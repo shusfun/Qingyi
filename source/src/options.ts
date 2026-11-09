@@ -107,6 +107,35 @@ function modelHint() {
     : "批量模式需要模型支持按编号返回 JSON 译文；不支持时会缩小批次重试。";
 }
 input("model").addEventListener("input", modelHint);
+bind("refresh-local-models", async () => {
+  await grant(input("local-url").value);
+  const entries = await send("LOCAL_MODELS", {
+    config: draft(),
+    trace: newTrace(),
+  });
+  const select = $<HTMLSelectElement>("local-model-select"),
+    list = $("local-model-list");
+  select.replaceChildren();
+  list.replaceChildren();
+  for (const item of entries) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = `${item.id} · ${item.model} · ${item.state}`;
+    select.append(option);
+    const hint = document.createElement("option");
+    hint.value = item.id;
+    list.append(hint);
+  }
+  if (entries.some((d: any) => d.id === input("local-model").value))
+    select.value = input("local-model").value;
+  showStatus(
+    "status",
+    `已读取 ${entries.length} 个本地部署。可选择列表项，也可手动填写 ID。`,
+  );
+});
+$("local-model-select").addEventListener("change", () => {
+  input("local-model").value = $<HTMLSelectElement>("local-model-select").value;
+});
 function draft() {
   return {
     apiUrl: input("api-url").value,

@@ -176,7 +176,7 @@ export async function request(
     });
     onAttempt("request");
     try {
-      const prompt = translationPrompt(c.model, sources);
+      const prompt = translationPrompt(c.modelProfile || c.model, sources);
       const response = await fetch(c.apiUrl, {
         method: "POST",
         redirect: "error",
@@ -195,6 +195,9 @@ export async function request(
           model: c.model,
           stream: true,
           temperature: 0.2,
+          ...(c.apiUrl === c.localUrl + "/v1/chat/completions"
+            ? { enable_thinking: false }
+            : {}),
           max_tokens: Math.min(
             8192,
             Math.max(256, sources.join("").length * 2),
@@ -304,7 +307,7 @@ export async function translateBatch(
   onAttempt: (phase?: string) => void,
 ): Promise<string[]> {
   if (
-    singleTextModel(c.model) &&
+    singleTextModel(c.modelProfile || c.model) &&
     sources.length === 1 &&
     sources[0].length > 900
   ) {
@@ -343,7 +346,7 @@ export async function translateBatch(
       return [joined];
     }
   }
-  if (singleTextModel(c.model) && sources.length > 1) {
+  if (singleTextModel(c.modelProfile || c.model) && sources.length > 1) {
     record(childTrace(t), "batch.fallback", {
       outcome: "fallback",
       reason: "model-single-text",

@@ -35,6 +35,7 @@ export interface TraceEvent extends Trace {
   source?: string;
 }
 export interface Config {
+  modelProfile?: string;
   apiUrl: string;
   apiKey: string;
   model: string;

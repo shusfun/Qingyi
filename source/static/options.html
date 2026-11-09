@@ -47,7 +47,20 @@
             ><input id="clear-local-token" type="checkbox" />删除本地
             Token</label
           >
-          <label>本地模型<input id="local-model" /></label>
+          <label
+            >本地模型／部署 ID<input
+              id="local-model"
+              list="local-model-list" /><datalist
+              id="local-model-list"
+            ></datalist
+          ></label>
+          <div class="actions">
+            <button id="refresh-local-models" type="button">
+              刷新本地部署列表</button
+            ><select id="local-model-select" aria-label="本地部署列表">
+              <option value="">选择部署或手动填写 ID</option>
+            </select>
+          </div>
           <label
             >本地后端<select id="local-backend">
               <option value="auto">跟随管理器</option>

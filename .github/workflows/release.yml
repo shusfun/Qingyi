@@ -40,5 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh release view $env:GITHUB_REF_NAME --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Output 'Existing release retained for verified replacement.'; exit 0 }
           gh release create $env:GITHUB_REF_NAME --verify-tag --generate-notes (Get-ChildItem ../releases -File | ForEach-Object FullName)
           if ($LASTEXITCODE) { throw 'Release publication failed' }

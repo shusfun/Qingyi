@@ -9,6 +9,7 @@ import { schedule } from "../src/network";
 test("local routing isolates cache revisions, falls back per paragraph and propagates correlation", async () => {
   const events: any[] = [],
     requests: any[] = [],
+    payloads: any[] = [],
     cache = new Map<string, string>();
   const session: Record<string, any> = {};
   (globalThis as any).chrome = {
@@ -38,10 +39,11 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
     },
   };
   let revision = "rev1",
-    statusModel = DEFAULTS.localModel;
+    deploymentRevision = "config1",
+    statusModel = "translation";
   const server = http.createServer(async (req, res) => {
     requests.push({ path: req.url, headers: req.headers });
-    if (req.url === "/api/v1/status") {
+    if (req.url?.startsWith("/api/v1/status?model=")) {
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
@@ -49,6 +51,14 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
           status: { state: "stopped" },
           model_revision: revision,
           selected_backend: "cpu",
+          deployments: [
+            {
+              id: statusModel,
+              model: DEFAULTS.localModel,
+              model_name: "tencent/HY-MT1.5-1.8B",
+              deployment_revision: deploymentRevision,
+            },
+          ],
         }),
       );
       return;
@@ -56,6 +66,7 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
     let raw = "";
     for await (const c of req) raw += c;
     const data = JSON.parse(raw);
+    payloads.push(data);
     if (
       req.url === "/v1/chat/completions" &&
       data.messages[0].content.endsWith("bad")
@@ -83,6 +94,7 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
     ...DEFAULTS,
     localUrl: url,
     localToken: "local-synthetic",
+    localModel: "translation",
     apiUrl: url + "/cloud",
     apiKey: "cloud-synthetic",
     model: "tencent/Hunyuan-MT-7B",
@@ -101,6 +113,14 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
     const a = await translateRouted(config, inputs, t, signal, () => {});
     assert.deepEqual(a.translations, ["本地译文", "云端译文"]);
     assert.equal(a.hits, 0);
+    assert.ok(
+      payloads.some(
+        (p) =>
+          p.model === "translation" &&
+          p.messages[0].content.startsWith("Translate the following segment"),
+      ),
+      "deployment alias must retain the underlying HY-MT prompt contract",
+    );
     assert.ok(
       a.entries.find((x) => x.source === "good")?.scope.startsWith("local:"),
     );
@@ -162,6 +182,19 @@ test("local routing isolates cache revisions, falls back per paragraph and propa
       requests.length,
       stoppedBefore + 2,
       "disabled auto-start cache miss must not call inference",
+    );
+    deploymentRevision = "config2";
+    const changed = await translateRouted(
+      config,
+      [inputs[0]],
+      t,
+      signal,
+      () => {},
+    );
+    assert.equal(
+      changed.hits,
+      0,
+      "deployment tuning change must invalidate the local cache",
     );
     statusModel = "different-model";
     const before = requests.filter((r) => r.path === "/cloud").length;

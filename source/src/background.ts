@@ -13,7 +13,7 @@ import {
 import { newTrace, childTrace, validTrace, sanitizeTrace } from "./trace";
 import { storage, record } from "./storage-client";
 import { fetchRelease } from "./releases";
-import { translateRouted } from "./local-provider";
+import { translateRouted, localModels } from "./local-provider";
 const ready = chrome.storage.local.setAccessLevel({
   accessLevel: "TRUSTED_CONTEXTS",
 });
@@ -419,6 +419,12 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
   try {
     let result;
     switch (m.type) {
+      case "LOCAL_MODELS": {
+        requireValue(validTrace(m.trace), "INVALID_TRACE");
+        const c = configFrom(m.config || {}, await config());
+        result = await localModels(c, m.trace);
+        break;
+      }
       case "PRIVATE":
         result = {
           ...publicConfig(await config()),

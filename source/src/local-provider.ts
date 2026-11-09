@@ -16,8 +16,8 @@ export async function providerScope(c: Config, local = false, revision = "") {
     JSON.stringify([
       c.apiUrl,
       c.model,
-      translationPolicy(c.model),
-      ...(local ? [revision] : []),
+      translationPolicy(c.modelProfile || c.model),
+      ...(local ? [revision, "local-no-thinking-v1"] : []),
     ]),
   );
   return local ? "local:" + digest : digest;
@@ -35,18 +35,27 @@ async function localConfig(c: Config, trace: Trace, signal: AbortSignal) {
     started = performance.now();
   record(t, "local.status.start", { outcome: "started" });
   try {
-    const response = await fetch(c.localUrl + "/api/v1/status", {
-      headers: {
-        Authorization: "Bearer " + c.localToken,
-        traceparent: traceparent(t),
+    const response = await fetch(
+      c.localUrl + "/api/v1/status?model=" + encodeURIComponent(c.localModel),
+      {
+        headers: {
+          Authorization: "Bearer " + c.localToken,
+          traceparent: traceparent(t),
+        },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(2500)]),
+        redirect: "error",
+        credentials: "omit",
       },
-      signal: AbortSignal.any([signal, AbortSignal.timeout(2500)]),
-      redirect: "error",
-      credentials: "omit",
-    });
+    );
     requireValue(response.ok, "LOCAL_HTTP_" + response.status);
     const data = await response.json();
-    requireValue(data.settings?.model === c.localModel, "LOCAL_MODEL_MISMATCH");
+    const deployment = Array.isArray(data.deployments)
+      ? data.deployments.find((d: any) => d.id === c.localModel)
+      : undefined;
+    requireValue(
+      deployment || data.settings?.model === c.localModel,
+      "LOCAL_MODEL_MISMATCH",
+    );
     requireValue(
       c.localBackend === "auto" || data.selected_backend === c.localBackend,
       "LOCAL_BACKEND_MISMATCH",
@@ -65,14 +74,80 @@ async function localConfig(c: Config, trace: Trace, signal: AbortSignal) {
         apiUrl: c.localUrl + "/v1/chat/completions",
         apiKey: c.localToken,
         model: c.localModel,
+        modelProfile:
+          deployment?.model_name || deployment?.model || c.localModel,
         intervalMs: 0,
       },
-      revision: data.model_revision as string,
+      revision: [
+        data.model_revision,
+        deployment?.deployment_revision || data.deployment_revision || "",
+      ].join(":"),
       running: data.status?.state === "running",
     };
   } catch (e) {
     record(t, "local.status.end", {
       outcome: signal.aborted ? "cancelled" : "failed",
+      durationMs: performance.now() - started,
+      reason: "LOCAL_UNAVAILABLE",
+    });
+    throw e;
+  }
+}
+
+export async function localModels(c: Config, trace: Trace) {
+  requireValue(c.localToken, "LOCAL_TOKEN_REQUIRED");
+  requireValue(
+    await chrome.permissions.contains({
+      origins: [new URL(c.localUrl).origin + "/*"],
+    }),
+    "LOCAL_PERMISSION_REQUIRED",
+  );
+  const t = childTrace(trace),
+    started = performance.now();
+  record(t, "local.catalog.start", { outcome: "started" });
+  try {
+    const response = await fetch(c.localUrl + "/api/v1/models", {
+      headers: {
+        Authorization: "Bearer " + c.localToken,
+        traceparent: traceparent(t),
+      },
+      signal: AbortSignal.timeout(5000),
+      redirect: "error",
+      credentials: "omit",
+    });
+    requireValue(response.ok, "LOCAL_HTTP_" + response.status);
+    const data = await response.json();
+    const entries = Array.isArray(data.deployments)
+      ? data.deployments.map((d: any) => ({
+          id: d.id,
+          model: d.model,
+          backend: d.backend,
+          state: d.status?.state,
+          revision: d.model_revision,
+        }))
+      : (data.models || [])
+          .filter((m: any) => m.kind === "model")
+          .map((m: any) => ({
+            id: m.id,
+            model: m.name || m.id,
+            backend: "auto",
+            state: "installed",
+            revision: m.version,
+          }));
+    requireValue(
+      entries.every(
+        (d: any) => typeof d.id === "string" && typeof d.model === "string",
+      ),
+      "LOCAL_INVALID_CATALOG",
+    );
+    record(t, "local.catalog.end", {
+      outcome: "success",
+      durationMs: performance.now() - started,
+    });
+    return entries;
+  } catch (e) {
+    record(t, "local.catalog.end", {
+      outcome: "failed",
       durationMs: performance.now() - started,
       reason: "LOCAL_UNAVAILABLE",
     });

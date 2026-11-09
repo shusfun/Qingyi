@@ -1,0 +1,8 @@
+/extension/
+/releases/
+/source/node_modules/
+*.log
+*.part
+.DS_Store
+.env
+.env.*

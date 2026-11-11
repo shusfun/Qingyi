@@ -1,9 +1,10 @@
+import { details } from "./ui/components.js";
 import type { ReleaseInfo } from "./releases";
 export function renderRelease(container: HTMLElement, release: ReleaseInfo) {
   container.replaceChildren();
-  const note = document.createElement("pre");
-  note.textContent = `当前 ${release.current} / 最新 ${release.tag}\n${release.newer ? "发现新版本，可手动下载更新。" : "当前版本无需升级；也可下载匹配安装包。"}\n${release.notes}`;
-  container.append(note);
+  const note = document.createElement("p");
+  note.textContent = `当前 ${release.current} / 最新 ${release.tag}\n${release.newer ? "发现新版本，可手动下载更新。" : "当前版本无需升级；也可下载匹配安装包。"}`;
+  container.append(note, details("版本说明", release.notes));
   if (!release.assets.length) {
     const message = document.createElement("p");
     message.textContent = "此 Release 没有与版本号匹配的 Chromium 安装包。";

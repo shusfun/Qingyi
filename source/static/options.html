@@ -7,285 +7,343 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">QINGYI / 3.0</p>
-        <h1>轻译设置</h1>
-        <p>网页右键开始翻译。文字留在缓存里，阅读回到页面上。</p>
-      </header>
-      <nav aria-label="设置导航">
-        <a href="#service">翻译服务</a><a href="#storage">本地缓存</a
-        ><a href="#packs">词库与版本</a><a href="#diagnostic">诊断</a
-        ><a href="#update">更新与迁移</a>
-      </nav>
-      <section id="service">
-        <h2>翻译服务</h2>
-        <p id="key-state" class="hint">读取配置…</p>
-        <label
-          >调用策略<select id="routing">
-            <option value="local-first">本地优先，失败回退云端</option>
-            <option value="local-only">仅本地</option>
-            <option value="cloud-only">仅云端</option>
-          </select></label
-        >
-        <fieldset>
-          <legend>mistral-gui 本地模型</legend>
-          <label
-            >管理器地址<input
-              id="local-url"
-              type="url"
-              placeholder="http://127.0.0.1:19820"
-          /></label>
-          <label
-            >本地 Token<input
-              id="local-token"
-              type="password"
-              autocomplete="new-password"
-              placeholder="留空保留已有 Token"
-          /></label>
-          <label class="check"
-            ><input id="clear-local-token" type="checkbox" />删除本地
-            Token</label
-          >
-          <label
-            >本地模型／部署 ID<input
-              id="local-model"
-              list="local-model-list" /><datalist
-              id="local-model-list"
-            ></datalist
-          ></label>
-          <div class="actions">
-            <button id="refresh-local-models" type="button">
-              刷新本地部署列表</button
-            ><select id="local-model-select" aria-label="本地部署列表">
-              <option value="">选择部署或手动填写 ID</option>
-            </select>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#service">轻译<span> / Qingyi</span></a>
+        <p class="eyebrow">阅读，回到文字本身。</p>
+        <nav aria-label="设置导航">
+          <a href="#service">翻译服务</a><a href="#reading">阅读与网站</a
+          ><a href="#storage">本地缓存</a><a href="#packs">词库与修订</a
+          ><a href="#diagnostic">诊断</a><a href="#update">更新与迁移</a>
+        </nav>
+        <footer>本地保存 · 按需翻译</footer>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">QINGYI / WORKSPACE</p>
+            <h1 id="page-title">翻译服务</h1>
+            <p id="page-summary" class="muted">
+              选择文字的去向，保留阅读的节奏。
+            </p>
           </div>
+          <span id="draft-state" class="badge" hidden>有未保存的更改</span>
+        </header>
+        <section class="page panel" id="service">
+          <h2>翻译服务</h2>
+          <p id="key-state" class="hint">读取配置…</p>
+          <p id="local-key-state" class="hint"></p>
           <label
-            >本地后端<select id="local-backend">
-              <option value="auto">跟随管理器</option>
-              <option value="cpu">CPU</option>
-              <option value="cuda">NVIDIA CUDA</option>
-              <option value="metal">Apple Metal</option>
+            >调用策略<select id="routing">
+              <option value="local-first">本地优先，失败回退云端</option>
+              <option value="local-only">仅本地</option>
+              <option value="cloud-only">仅云端</option>
             </select></label
           >
-          <label class="check"
-            ><input
-              id="local-auto-start"
-              type="checkbox"
-            />允许等待本地模型按需启动</label
-          >
-          <p class="hint">
-            词库与用户修订命中时不联系管理器。本地结果单独保留最多 256
-            MiB，云端结果继续隔离保存。
+          <fieldset>
+            <legend>mistral-gui 本地模型</legend>
+            <label
+              >管理器地址<input
+                id="local-url"
+                type="url"
+                placeholder="http://127.0.0.1:19820"
+            /></label>
+            <label
+              >本地 Token<input
+                id="local-token"
+                type="password"
+                autocomplete="new-password"
+                placeholder="留空保留已有 Token"
+            /></label>
+            <label class="check"
+              ><input id="clear-local-token" type="checkbox" />删除本地
+              Token</label
+            >
+            <label
+              >本地模型／部署 ID<input
+                id="local-model"
+                list="local-model-list" /><datalist
+                id="local-model-list"
+              ></datalist
+            ></label>
+            <div class="actions">
+              <button id="refresh-local-models" type="button">
+                刷新本地部署列表</button
+              ><select
+                id="local-model-select"
+                data-transient
+                aria-label="本地部署列表"
+              >
+                <option value="">选择部署或手动填写 ID</option>
+              </select>
+            </div>
+            <p id="local-models-status" role="status">部署列表尚未刷新。</p>
+            <label
+              >本地后端<select id="local-backend">
+                <option value="auto">跟随管理器</option>
+                <option value="cpu">CPU</option>
+                <option value="cuda">NVIDIA CUDA</option>
+                <option value="metal">Apple Metal</option>
+              </select></label
+            >
+            <label class="check"
+              ><input
+                id="local-auto-start"
+                type="checkbox"
+              />允许等待本地模型按需启动</label
+            >
+            <p class="hint">
+              词库与用户修订命中时不联系管理器。本地结果单独保留最多 256
+              MiB，云端结果继续隔离保存。
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>云端模型服务</legend>
+            <label
+              >API 地址<input
+                id="api-url"
+                type="url"
+                autocomplete="off" /></label
+            ><label
+              >API Key<input
+                id="api-key"
+                type="password"
+                autocomplete="new-password"
+                placeholder="留空保留已有 Key" /></label
+            ><label class="check"
+              ><input id="clear-key" type="checkbox" />删除已保存的 Key</label
+            ><label>模型<input id="model" autocomplete="off" /></label>
+          </fieldset>
+          <details>
+            <summary>高级请求设置</summary>
+            <div class="grid">
+              <label
+                >单次超时（秒）<input
+                  id="timeout"
+                  type="number"
+                  min="10"
+                  max="180"
+                  step="5"
+              /></label>
+              <label
+                >请求间隔（秒）<input
+                  id="interval"
+                  type="number"
+                  min="0"
+                  max="120"
+                  step=".5" /></label
+              ><label
+                >并发请求<select id="concurrency">
+                  <option>1</option>
+                  <option>2</option>
+                  <option>3</option>
+                  <option>4</option>
+                </select></label
+              >
+            </div>
+            <label class="check"
+              ><input id="batch" type="checkbox" />批量翻译：首屏优先，后续最多
+              16 条、约 5000 字符</label
+            >
+            <p id="model-hint" class="hint"></p>
+            <p class="hint">
+              文字会发送到配置的模型服务。Key
+              只保存在本浏览器扩展本地存储。测试连接会发送一句短文本。
+            </p>
+          </details>
+          <div class="actions">
+            <button id="save" class="primary">保存并核对</button
+            ><button id="test">测试连接</button
+            ><button id="reload-config">重新读取配置</button>
+          </div>
+          <p id="status" role="status" aria-live="polite"></p>
+          <p id="connection-test-status" role="status" aria-live="polite">
+            尚未测试连接。
           </p>
-        </fieldset>
-        <label
-          >API 地址<input id="api-url" type="url" autocomplete="off" /></label
-        ><label
-          >API Key<input
-            id="api-key"
-            type="password"
-            autocomplete="new-password"
-            placeholder="留空保留已有 Key" /></label
-        ><label class="check"
-          ><input id="clear-key" type="checkbox" />删除已保存的 Key</label
-        ><label>模型<input id="model" autocomplete="off" /></label>
-        <div class="grid">
+        </section>
+        <section class="page panel" id="reading">
+          <h2>阅读与网站</h2>
           <label
-            >单次超时（秒）<input
-              id="timeout"
-              type="number"
-              min="10"
-              max="180"
-              step="5"
-          /></label>
-          <label
-            >请求间隔（秒）<input
-              id="interval"
-              type="number"
-              min="0"
-              max="120"
-              step=".5" /></label
-          ><label
-            >并发请求<select id="concurrency">
-              <option>1</option>
-              <option>2</option>
-              <option>3</option>
-              <option>4</option>
-            </select></label
-          ><label
             >显示方式<select id="mode">
               <option value="chinese">中文</option>
               <option value="bilingual">双语</option>
             </select></label
-          >
-        </div>
-        <label class="check"
-          ><input id="batch" type="checkbox" />批量翻译：首屏优先，后续最多 16
-          条、约 5000 字符</label
-        >
-        <p id="model-hint" class="hint"></p>
-        <p class="hint">
-          文字会发送到配置的模型服务。Key
-          只保存在本浏览器扩展本地存储。测试连接会发送一句短文本。
-        </p>
-        <div class="actions">
-          <button id="save" class="primary">保存并核对</button
-          ><button id="test">测试连接</button
-          ><button id="reload-config">重新读取配置</button>
-        </div>
-        <p id="status" role="status" aria-live="polite"></p>
-        <label class="check"
-          ><input
-            id="progress-visible"
-            type="checkbox"
-          />默认显示小进度条</label
-        >
-        <p class="hint">
-          网页上的 ×
-          仅关闭该页面进度条。点击“轻译”打开设置；拖动可在本设备记住位置。
-        </p>
-        <div id="sites"></div>
-      </section>
-      <section id="storage">
-        <h2>本地缓存</h2>
-        <div class="grid">
-          <label
-            >总预算（GiB）<input
-              id="budget"
-              type="number"
-              min=".0625"
-              max="64"
-              step=".25"
-          /></label>
-        </div>
-        <p class="hint">
-          索引、版本、日志和导入暂存均占空间。默认 4
-          GiB；容量取决于内容。命中缓存不会持久化更新访问时间或 LRU。
-        </p>
-        <div class="actions">
-          <button id="budget-save">保存预算</button
-          ><button id="stats-refresh">刷新统计</button
-          ><button id="flush">提交待写缓存</button>
-        </div>
-        <pre id="db-stats" aria-live="polite">
-进入本地缓存后读取统计，也可点击“刷新统计”。</pre
-        >
-        <div class="actions">
-          <button id="clear-model">清理模型缓存</button
-          ><button id="collect">分批回收孤立块</button
-          ><button id="collect-stop">停止维护</button>
-        </div>
-        <p id="storage-status" role="status"></p>
-      </section>
-      <section id="packs">
-        <h2>词库与版本</h2>
-        <p class="hint">
-          导入 qingyi-pack-v1 JSONL 或 gzip 容器：首行
-          manifest，后续每行一个带摘要的 gzip
-          数据块。完整包与增量包先暂存校验，完成后切换版本；失败时保留旧版。
-        </p>
-        <label
-          >本地词库<input
-            id="pack-file"
-            type="file"
-            accept=".jsonl,.gz,application/gzip" /></label
-        ><label
-          >HTTPS 词库地址<input
-            id="pack-url"
-            type="url"
-            placeholder="https://…/dictionary.jsonl.gz"
-        /></label>
-        <div class="actions">
-          <button id="import-local">导入文件</button
-          ><button id="source-save">保存来源</button
-          ><button id="source-check">检查来源版本</button
-          ><button id="import-url">下载并导入</button
-          ><button id="import-stop">取消导入</button>
-        </div>
-        <p id="pack-status" role="status"></p>
-        <div id="pack-list"></div>
-        <h3>用户修订</h3>
-        <p class="hint">
-          修订优先于词库和模型缓存，每条保留最近 20
-          版。使用精确原文；含结构占位符的段落须保持占位符。
-        </p>
-        <div class="grid">
-          <label>原语言<input id="revision-language" value="auto" /></label
-          ><label>目标语言<input id="revision-target" value="zh-CN" /></label
+          ><button id="reading-save" type="button" class="primary">
+            保存阅读方式</button
           ><label
-            >网站来源<input
-              id="revision-domain"
-              placeholder="https://example.com"
+            >外观<select id="theme" data-transient>
+              <option value="system">跟随系统</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select></label
+          >
+          <p class="hint">外观和进度显示即时保存，不会中断翻译。</p>
+          <p id="reading-status" role="status"></p>
+          <label class="check"
+            ><input
+              id="progress-visible"
+              data-transient
+              type="checkbox"
+            />默认显示小进度条</label
+          >
+          <p class="hint">
+            网页上的 ×
+            仅关闭该页面进度条。点击“轻译”打开设置；拖动可在本设备记住位置。
+          </p>
+          <div id="sites"></div>
+        </section>
+        <section class="page panel" id="storage">
+          <h2>本地缓存</h2>
+          <div class="grid">
+            <label
+              >总预算（GiB）<input
+                id="budget"
+                type="number"
+                min=".0625"
+                max="64"
+                step=".25"
+            /></label>
+          </div>
+          <p class="hint">
+            索引、版本、日志和导入暂存均占空间。默认 4
+            GiB；容量取决于内容。命中缓存不会持久化更新访问时间或 LRU。
+          </p>
+          <div class="actions">
+            <button id="budget-save">保存预算</button
+            ><button id="stats-refresh">刷新统计</button
+            ><button id="flush">提交待写缓存</button>
+          </div>
+          <div id="cache-summary" class="stats"></div>
+          <details>
+            <summary>存储详情</summary>
+            <pre id="db-stats" aria-live="polite">
+进入本地缓存后读取统计，也可点击“刷新统计”。</pre
+            >
+          </details>
+          <div class="actions">
+            <button id="clear-model">清理模型缓存</button
+            ><button id="collect">分批回收孤立块</button
+            ><button id="collect-stop">停止维护</button>
+          </div>
+          <p id="storage-status" role="status"></p>
+        </section>
+        <section class="page panel" id="packs">
+          <h2>词库与版本</h2>
+          <p class="hint">
+            导入 qingyi-pack-v1 JSONL 或 gzip 容器：首行
+            manifest，后续每行一个带摘要的 gzip
+            数据块。完整包与增量包先暂存校验，完成后切换版本；失败时保留旧版。
+          </p>
+          <label
+            >本地词库<input
+              id="pack-file"
+              data-transient
+              type="file"
+              accept=".jsonl,.gz,application/gzip" /></label
+          ><label
+            >HTTPS 词库地址<input
+              id="pack-url"
+              type="url"
+              placeholder="https://…/dictionary.jsonl.gz"
           /></label>
-        </div>
-        <label>原文<textarea id="revision-source" rows="3"></textarea></label
-        ><label
-          >译文<textarea id="revision-translation" rows="3"></textarea>
-        </label>
-        <div class="actions">
-          <button id="revision-save">保存修订</button
-          ><button id="revision-history">查看历史</button
-          ><button id="revision-clear">清除全部修订历史</button>
-        </div>
-        <pre id="revision-result"></pre>
-      </section>
-      <section id="diagnostic">
-        <h2>诊断追踪</h2>
-        <p class="hint">
-          追踪扫描、缓存、排队、请求尝试、数据库提交和页面回填。不记录
-          Key、原文、译文或请求体。第三方内部链路不可观测；没有供应商请求 ID
-          时标记为不可关联。
-        </p>
-        <div class="grid">
-          <label>traceId<input id="trace-id" autocomplete="off" /></label
-          ><label>batchId<input id="batch-id" autocomplete="off" /></label>
-        </div>
-        <div class="actions">
-          <button id="trace-search">查询</button
-          ><button id="trace-export">导出脱敏诊断</button
-          ><button id="trace-clear">清除诊断</button>
-          <button id="trace-newer" disabled>较新一页</button
-          ><button id="trace-older" disabled>较旧一页</button>
-        </div>
-        <p id="trace-summary" class="hint">
-          按需查询，每页最多 200 条；完整记录通过导出查看。
-        </p>
-        <pre id="trace-results"></pre>
-      </section>
-      <section id="update">
-        <h2>更新与迁移</h2>
-        <label
-          >GitHub owner/repo<input id="release-repo" placeholder="owner/qingyi"
-        /></label>
-        <div class="actions">
-          <button id="release-check">检查最新 Release</button>
-        </div>
-        <div id="release-result"></div>
-        <p class="hint">
-          手动下载 ZIP 与 SHA-256
-          后，核对摘要，替换安装目录，再到扩展管理页重新加载。插件不会自动执行下载文件或覆盖本地目录。
-        </p>
-        <h3>从旧版轻译迁移</h3>
-        <p class="hint">
-          先打开旧版设置，启用一次性迁移并获得 6 位验证码。Key
-          通过指定扩展间消息传递，不导出为文件。迁移完成前保留旧扩展；新扩展需重新授权
-          API 和网站。
-        </p>
-        <label
-          >旧版迁移验证码<input
-            id="migration-code"
-            inputmode="numeric"
-            maxlength="6" /></label
-        ><button id="migrate">导入旧版配置与隔离缓存</button>
-        <p id="migration-status" role="status"></p>
-        <p class="hint">安装目录：<code>C:\develop\Qingyi\extension</code></p>
-      </section>
-      <footer>
-        轻译 3.0 · 本地打包运行 · 视频、OCR 与远程数据库不在本版范围
-      </footer>
-    </main>
+          <div class="actions">
+            <button id="import-local">导入文件</button
+            ><button id="source-save">保存来源</button
+            ><button id="source-check">检查来源版本</button
+            ><button id="import-url">下载并导入</button
+            ><button id="import-stop">取消导入</button>
+          </div>
+          <p id="pack-status" role="status"></p>
+          <div id="pack-list"></div>
+          <h3>用户修订</h3>
+          <p class="hint">
+            修订优先于词库和模型缓存，每条保留最近 20
+            版。使用精确原文；含结构占位符的段落须保持占位符。
+          </p>
+          <div class="grid">
+            <label>原语言<input id="revision-language" value="auto" /></label
+            ><label>目标语言<input id="revision-target" value="zh-CN" /></label
+            ><label
+              >网站来源<input
+                id="revision-domain"
+                placeholder="https://example.com"
+            /></label>
+          </div>
+          <label>原文<textarea id="revision-source" rows="3"></textarea></label
+          ><label
+            >译文<textarea id="revision-translation" rows="3"></textarea>
+          </label>
+          <div class="actions">
+            <button id="revision-save">保存修订</button
+            ><button id="revision-history">查看历史</button
+            ><button id="revision-clear">清除全部修订历史</button>
+          </div>
+          <div id="revision-result" role="status"></div>
+        </section>
+        <section class="page panel" id="diagnostic">
+          <h2>诊断追踪</h2>
+          <p class="hint">
+            追踪扫描、缓存、排队、请求尝试、数据库提交和页面回填。不记录
+            Key、原文、译文或请求体。第三方内部链路不可观测；没有供应商请求 ID
+            时标记为不可关联。
+          </p>
+          <div class="grid">
+            <label
+              >traceId<input
+                id="trace-id"
+                data-transient
+                autocomplete="off" /></label
+            ><label
+              >batchId<input id="batch-id" data-transient autocomplete="off"
+            /></label>
+          </div>
+          <div class="actions">
+            <button id="trace-search">查询</button
+            ><button id="trace-export">导出脱敏诊断</button
+            ><button id="trace-clear">清除诊断</button>
+            <button id="trace-newer" disabled>较新一页</button
+            ><button id="trace-older" disabled>较旧一页</button>
+          </div>
+          <p id="trace-summary" class="hint">
+            按需查询，每页最多 200 条；完整记录通过导出查看。
+          </p>
+          <div id="trace-results"></div>
+        </section>
+        <section class="page panel" id="update">
+          <h2>更新与迁移</h2>
+          <label
+            >GitHub owner/repo<input
+              id="release-repo"
+              placeholder="owner/qingyi"
+          /></label>
+          <div class="actions">
+            <button id="release-check">检查最新 Release</button>
+          </div>
+          <div id="release-result"></div>
+          <p class="hint">
+            手动下载 ZIP 与 SHA-256
+            后，核对摘要，替换安装目录，再到扩展管理页重新加载。插件不会自动执行下载文件或覆盖本地目录。
+          </p>
+          <h3>从旧版轻译迁移</h3>
+          <p class="hint">
+            先打开旧版设置，启用一次性迁移并获得 6 位验证码。Key
+            通过指定扩展间消息传递，不导出为文件。迁移完成前保留旧扩展；新扩展需重新授权
+            API 和网站。
+          </p>
+          <label
+            >旧版迁移验证码<input
+              id="migration-code"
+              data-transient
+              inputmode="numeric"
+              maxlength="6" /></label
+          ><button id="migrate">导入旧版配置与隔离缓存</button>
+          <p id="migration-status" role="status"></p>
+        </section>
+        <footer>
+          轻译 3.0 · 本地打包运行 · 视频、OCR 与远程数据库不在本版范围
+        </footer>
+      </main>
+    </div>
     <script type="module" src="options.js"></script>
   </body>
 </html>

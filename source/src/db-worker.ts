@@ -57,14 +57,20 @@ onmessage = (event: MessageEvent) => {
   serial = serial
     .catch(() => {})
     .then(async () => {
+      const t: Trace = validTrace(trace) ? trace : newTrace();
+      const began = performance.now();
+      record(t, "worker.start", { outcome: "started", resourceId: operation });
       try {
         requireValue(operations.has(operation), "INVALID_DATABASE_OPERATION");
         const db = await database();
-        const t: Trace = validTrace(trace) ? trace : newTrace();
         if (operation === "maintenanceStop") {
           clearTimeout(maintenanceTimer);
           maintenanceTimer = undefined;
           maintenanceCancelled = true;
+          record(t, "worker.end", {
+            outcome: "success",
+            resourceId: operation,
+          });
           postMessage({ id, ok: true, data: { stopped: true } });
           return;
         }
@@ -89,6 +95,11 @@ onmessage = (event: MessageEvent) => {
         )
           callArgs.push(t);
         const result = await (db as any)[operation](...callArgs);
+        record(t, "worker.end", {
+          outcome: "success",
+          resourceId: operation,
+          durationMs: performance.now() - began,
+        });
         postMessage({ id, ok: true, data: result });
         if (
           [
@@ -132,6 +143,12 @@ onmessage = (event: MessageEvent) => {
           }, 60000);
         }
       } catch (error) {
+        record(t, "worker.end", {
+          outcome: "failed",
+          resourceId: operation,
+          reason: "DATABASE_FAILED",
+          durationMs: performance.now() - began,
+        });
         postMessage({
           id,
           ok: false,

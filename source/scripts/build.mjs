@@ -16,6 +16,7 @@ for (const entry of [
     entryPoints: [path.join(root, "src", entry + ".ts")],
     outfile: path.join(out, entry + ".js"),
     bundle: true,
+    loader: { ".css": "text" },
     format: ["content", "shadow-hook"].includes(entry) ? "iife" : "esm",
     platform: "browser",
     target: "chrome120",

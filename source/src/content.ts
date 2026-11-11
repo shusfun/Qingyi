@@ -1,3 +1,5 @@
+import themeTokens from "../static/tokens.css";
+import progressStyles from "./ui/progress.css";
 import { newTrace, childTrace, validTrace } from "./trace";
 import { validTranslation, type Trace } from "./types";
 import { singleTextModel } from "./model-profile";
@@ -76,7 +78,19 @@ async function launch() {
   host.style.cssText =
     "position:fixed!important;inset:0 auto auto 0!important;width:0!important;height:0!important;z-index:2147483647!important;";
   const shadow = host.attachShadow({ mode: "closed" });
-  shadow.innerHTML = `<style>:host{all:initial;font:12px/1.5 system-ui;color:#292824}*{box-sizing:border-box}[hidden]{display:none!important}.box{position:fixed;right:16px;bottom:16px;width:300px;max-width:calc(100vw - 16px);background:#faf9f5f5;border:1px solid #ddd9ce;border-radius:9px;padding:9px 11px;box-shadow:0 3px 16px #2928241a;backdrop-filter:blur(10px)}.top{display:flex;gap:8px;align-items:center;touch-action:none}.settings{font:inherit;font-weight:700;color:inherit;background:none;border:0;padding:0;cursor:pointer;user-select:none;touch-action:none}.settings:focus-visible{outline:2px solid #c96442;outline-offset:3px;border-radius:2px}.state{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#716f66}.close{font:18px system-ui;cursor:pointer;background:none;border:0;color:#716f66}.counts{font-size:11px;color:#716f66;margin:3px 0 6px}.track{height:3px;border-radius:3px;background:#e8e4d9;overflow:hidden}.fill{height:100%;background:#c96442;width:0}.error .state{color:#b4432f}@media(prefers-reduced-motion:no-preference){.fill{transition:width .2s}}</style><section class="box" hidden aria-label="轻译统计"><div class="top"><button type="button" class="settings">轻译</button><span class="state" role="status"></span><button class="close" aria-label="关闭本页进度条">×</button></div><div class="counts"></div><div class="track" role="progressbar" aria-label="翻译进度" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div></section>`;
+  shadow.innerHTML = `<style>${themeTokens}${progressStyles}</style><section class="box" hidden aria-label="轻译统计"><div class="top"><button type="button" class="settings">轻译</button><span class="state" role="status"></span><button class="close" aria-label="关闭本页进度条">×</button></div><div class="counts"></div><div class="track" role="progressbar" aria-label="翻译进度" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div></section>`;
+  host.dataset.theme = info.theme || "system";
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes["ui.theme"]) {
+      info.theme = changes["ui.theme"].newValue || "system";
+      host.dataset.theme = info.theme;
+    }
+    if (changes["ui.progressVisible"]) {
+      info.progressVisible = changes["ui.progressVisible"].newValue !== false;
+      if (host.isConnected) mount();
+    }
+  });
   const box = shadow.querySelector(".box") as HTMLElement,
     state = shadow.querySelector(".state")!,
     counts = shadow.querySelector(".counts")!,
@@ -98,17 +112,17 @@ async function launch() {
       box.style.bottom = "auto";
       box.style.left =
         Math.max(
-          8,
+          7,
           Math.min(
-            innerWidth - box.offsetWidth - 8,
+            innerWidth - box.offsetWidth - 7,
             info.position.x * innerWidth,
           ),
         ) + "px";
       box.style.top =
         Math.max(
-          8,
+          7,
           Math.min(
-            innerHeight - box.offsetHeight - 8,
+            innerHeight - box.offsetHeight - 7,
             info.position.y * innerHeight,
           ),
         ) + "px";
@@ -127,7 +141,7 @@ async function launch() {
     const value = units.size
       ? Math.min(100, Math.round((currentRendered / units.size) * 100))
       : 0;
-    fill.style.width = value + "%";
+    fill.style.transform = `scaleX(${value / 100})`;
     track.setAttribute("aria-valuenow", String(value));
     mount();
   }
@@ -200,7 +214,7 @@ async function launch() {
       Math.max(
         8,
         Math.min(
-          innerWidth - box.offsetWidth - 8,
+          innerWidth - box.offsetWidth - 7,
           drag.left + p.clientX - drag.x,
         ),
       ) + "px";
@@ -208,7 +222,7 @@ async function launch() {
       Math.max(
         8,
         Math.min(
-          innerHeight - box.offsetHeight - 8,
+          innerHeight - box.offsetHeight - 7,
           drag.top + p.clientY - drag.y,
         ),
       ) + "px";
@@ -453,7 +467,7 @@ async function launch() {
       annotation.dataset.qingyi = "translation";
       annotation.setAttribute("translate", "no");
       annotation.style.cssText =
-        "display:block;color:#a35035;font-size:.94em;line-height:1.65;margin:3px 0 5px";
+        "display:block;color:inherit;font:inherit;margin-block:var(--qingyi-translation-gap, 3px);border-inline-start:var(--qingyi-translation-stroke, 3px) solid currentColor;padding-inline-start:var(--qingyi-translation-inset, 7px)";
       annotation.textContent = value.replace(/__QY\d+__/g, "");
       unit.el.after(annotation);
       unit.annotation = annotation;

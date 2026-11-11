@@ -1,0 +1,85 @@
+:host {
+  all: initial;
+  font: var(--font-sm) / var(--line-height) var(--font-body);
+  color: var(--color-text);
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none;
+}
+.box {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  width: var(--progress-width);
+  max-width: calc(100vw - var(--space-5));
+  background: var(--color-panel);
+  border: var(--stroke) solid var(--color-border);
+  border-radius: var(--radius-md);
+  corner-shape: squircle;
+  padding: var(--space-3);
+  box-shadow: var(--material-shadow);
+}
+.top {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  touch-action: none;
+}
+.settings {
+  font: inherit;
+  font-weight: var(--weight-bold);
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+button:focus-visible {
+  outline: var(--focus) solid var(--color-accent);
+  outline-offset: var(--space-1);
+}
+.state {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-muted);
+}
+.close {
+  font: inherit;
+  font-size: var(--font-lg);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  color: var(--color-muted);
+}
+.counts {
+  font-size: var(--font-xs);
+  color: var(--color-muted);
+  margin: var(--space-1) 0 var(--space-2);
+}
+.track {
+  height: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-border);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.error .state {
+  color: var(--color-danger);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fill {
+    transition: transform var(--motion-fast);
+  }
+}

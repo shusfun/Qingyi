@@ -1,0 +1,103 @@
+/* Palette → semantics → materials. Components consume semantic and material tokens. */
+:root,
+:host {
+  --palette-canvas: #f3efe7;
+  --palette-panel: #faf7f0;
+  --palette-raised: #fffdf7;
+  --palette-ink: #302e29;
+  --palette-muted: #756e63;
+  --palette-line: #ddd5c7;
+  --palette-accent: #a94d31;
+  --palette-accent-soft: #f4e4d8;
+  --palette-on-accent: #fff9f0;
+  --palette-good: #327052;
+  --palette-bad: #b43e34;
+  --palette-warn: #916019;
+  --color-bg: var(--palette-canvas);
+  --color-panel: var(--palette-panel);
+  --color-raised: var(--palette-raised);
+  --color-text: var(--palette-ink);
+  --color-muted: var(--palette-muted);
+  --color-border: var(--palette-line);
+  --color-accent: var(--palette-accent);
+  --color-accent-soft: var(--palette-accent-soft);
+  --color-on-accent: var(--palette-on-accent);
+  --color-success: var(--palette-good);
+  --color-danger: var(--palette-bad);
+  --color-warning: var(--palette-warn);
+  --material-shadow: 0 5px 19px
+    color-mix(in srgb, var(--color-text) 7%, transparent);
+  --material-overlay: color-mix(in srgb, var(--color-text) 35%, transparent);
+  --space-1: 3px;
+  --space-2: 7px;
+  --space-3: 11px;
+  --space-4: 15px;
+  --space-5: 19px;
+  --space-6: 25px;
+  --space-7: 33px;
+  --space-8: 49px;
+  --font-xs: 11px;
+  --font-sm: 13px;
+  --font-md: 15px;
+  --font-lg: 19px;
+  --font-xl: 25px;
+  --font-display: 35px;
+  --radius-sm: 7px;
+  --radius-md: 13px;
+  --radius-lg: 21px;
+  --stroke: 1px;
+  --focus: 3px;
+  --control-height: 39px;
+  --sidebar-width: 231px;
+  --content-width: 1051px;
+  --field-width: 231px;
+  --progress-width: 301px;
+  --dialog-width: 493px;
+  --detail-height: 379px;
+  --titlebar-height: 47px;
+  --window-button-width: 47px;
+  --traffic-inset: 85px;
+  --motion-fast: 175ms;
+  --motion-normal: 235ms;
+  --weight-medium: 550;
+  --weight-bold: 650;
+  --font-body:
+    system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-code: ui-monospace, Consolas, monospace;
+  --line-height: 1.65;
+  color-scheme: light;
+}
+:root[data-theme="dark"],
+:host([data-theme="dark"]) {
+  --palette-canvas: #211f1c;
+  --palette-panel: #292622;
+  --palette-raised: #33302a;
+  --palette-ink: #eee7db;
+  --palette-muted: #b8ae9e;
+  --palette-line: #494237;
+  --palette-accent: #e79570;
+  --palette-accent-soft: #473025;
+  --palette-on-accent: #271e18;
+  --palette-good: #91c6a3;
+  --palette-bad: #f09c91;
+  --palette-warn: #dfbd7f;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]),
+  :host(:not([data-theme="light"]):not([data-theme="dark"])) {
+    --palette-canvas: #211f1c;
+    --palette-panel: #292622;
+    --palette-raised: #33302a;
+    --palette-ink: #eee7db;
+    --palette-muted: #b8ae9e;
+    --palette-line: #494237;
+    --palette-accent: #e79570;
+    --palette-accent-soft: #473025;
+    --palette-on-accent: #271e18;
+    --palette-good: #91c6a3;
+    --palette-bad: #f09c91;
+    --palette-warn: #dfbd7f;
+    color-scheme: dark;
+  }
+}

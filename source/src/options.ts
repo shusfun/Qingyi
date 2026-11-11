@@ -1,3 +1,14 @@
+import { send, scoped, record, runOperation } from "./ui/request";
+import {
+  button,
+  details,
+  confirmAction,
+  applyTheme,
+  createDrafts,
+  empty,
+  records,
+} from "./ui/components.js";
+import type { SettingsView, CacheStatus, TracePage } from "./ui/models";
 import { newTrace, childTrace, traceparent } from "./trace";
 import { MiB, type Trace, type CacheInput, type PackManifest } from "./types";
 import { lines } from "./codec";
@@ -6,61 +17,59 @@ import { singleTextModel } from "./model-profile";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
-let config: any;
+let config: SettingsView;
+const drafts = createDrafts();
 let importing: AbortController | undefined,
   maintenance = false;
-async function send(
-  type: string,
-  payload: Record<string, unknown> = {},
-): Promise<any> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let r;
-  try {
-    const response = chrome.runtime.sendMessage({ type, ...payload });
-    r =
-      type === "PRIVATE"
-        ? await Promise.race([
-            response,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(
-                    Error(
-                      "后台未响应，请在浏览器扩展管理页重新启用轻译，再点击重新读取配置。",
-                    ),
-                  ),
-                10000,
-              );
-            }),
-          ])
-        : await response;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-  if (!r?.ok) throw Error(r?.error || "EXTENSION_UNAVAILABLE");
-  return r.data;
-}
+let maintenanceTrace: Trace | undefined, importTrace: Trace | undefined;
 const db = (operation: string, args: unknown[] = [], trace = newTrace()) =>
-  send("DATABASE", { operation, args, trace });
+  send("DATABASE", { operation, args, trace: childTrace(trace) });
 function showStatus(id: string, value: unknown) {
-  $(id).textContent =
-    typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  $(id).setAttribute("role", "status");
+  $(id).dataset.tone = "neutral";
+  $(id).nextElementSibling?.matches(".error-detail") &&
+    $(id).nextElementSibling?.remove();
+  if (typeof value === "string") $(id).textContent = value;
+  else $(id).replaceChildren(details("详情", value));
 }
-function bind(id: string, action: () => Promise<unknown>, status = "status") {
+function bind(
+  id: string,
+  action: (trace: Trace) => Promise<unknown>,
+  status = "status",
+) {
   const button = $<HTMLButtonElement>(id);
   button.addEventListener("click", async () => {
+    if (button.disabled) return;
     button.disabled = true;
+    button.setAttribute("aria-busy", "true");
     try {
-      await action();
+      await runOperation(id, action);
     } catch (e) {
-      showStatus(status, e instanceof Error ? e.message : "操作失败");
+      showStatus(status, "操作未完成，请检查设置或权限后重试。");
+      $(status).setAttribute("role", "alert");
+      $(status).dataset.tone = "error";
+      const detail = details(
+        "查看错误原因",
+        e instanceof Error ? e.message : "操作失败",
+      );
+      detail.className = "error-detail";
+      $(status).after(detail);
     } finally {
+      button.removeAttribute("aria-busy");
       button.disabled = button.dataset.unavailable === "true";
+      $("draft-state").hidden = !drafts.any();
     }
   });
 }
-function show(c: any) {
+function show(c: SettingsView) {
+  const savedDrafts = drafts.snapshot();
   config = c;
+  applyTheme(c["ui.theme"] || "system");
+  input("theme").value = c["ui.theme"] || "system";
+  showStatus(
+    "local-key-state",
+    c.hasLocalToken ? "本地 Token 已配置" : "本地 Token 未配置",
+  );
   input("api-url").value = c.apiUrl;
   input("routing").value = c.routing;
   input("local-url").value = c.localUrl;
@@ -91,15 +100,26 @@ function show(c: any) {
     row.className = "actions";
     const text = document.createElement("span");
     text.textContent = site;
-    const button = document.createElement("button");
-    button.textContent = "关闭自动翻译";
-    button.onclick = async () => {
-      await send("REMOVE_SITE", { origin: site });
-      show(await send("PRIVATE"));
+    const control = button("关闭自动翻译");
+
+    control.onclick = () => {
+      void runOperation("remove-site", async (t) => {
+        control.disabled = true;
+        const { send } = scoped(t);
+        await send("REMOVE_SITE", { origin: site });
+        show(await send("PRIVATE"));
+      })
+        .catch((e) => showStatus("reading-status", e.message))
+        .finally(() => {
+          control.disabled = false;
+        });
     };
-    row.append(text, button);
+    row.append(text, control);
     $("sites").append(row);
   }
+  if (!$("sites").children.length)
+    empty($("sites"), "还没有自动翻译的网站，可在网页右键菜单中开启。");
+  drafts.restore(savedDrafts);
 }
 function modelHint() {
   $("model-hint").textContent = singleTextModel(input("model").value)
@@ -107,34 +127,44 @@ function modelHint() {
     : "批量模式需要模型支持按编号返回 JSON 译文；不支持时会缩小批次重试。";
 }
 input("model").addEventListener("input", modelHint);
-bind("refresh-local-models", async () => {
-  await grant(input("local-url").value);
-  const entries = await send("LOCAL_MODELS", {
-    config: draft(),
-    trace: newTrace(),
-  });
-  const select = $<HTMLSelectElement>("local-model-select"),
-    list = $("local-model-list");
-  select.replaceChildren();
-  list.replaceChildren();
-  for (const item of entries) {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = `${item.id} · ${item.model} · ${item.state}`;
-    select.append(option);
-    const hint = document.createElement("option");
-    hint.value = item.id;
-    list.append(hint);
-  }
-  if (entries.some((d: any) => d.id === input("local-model").value))
-    select.value = input("local-model").value;
-  showStatus(
-    "status",
-    `已读取 ${entries.length} 个本地部署。可选择列表项，也可手动填写 ID。`,
-  );
-});
+bind(
+  "refresh-local-models",
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    await grant(input("local-url").value, t);
+    const entries = await send("LOCAL_MODELS", {
+      config: draft(),
+      trace: t,
+    });
+    const select = $<HTMLSelectElement>("local-model-select"),
+      list = $("local-model-list");
+    select.replaceChildren(new Option("选择部署或手动填写 ID", ""));
+    list.replaceChildren();
+    for (const item of entries) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = `${item.id} · ${item.model} · ${item.state}`;
+      select.append(option);
+      const hint = document.createElement("option");
+      hint.value = item.id;
+      list.append(hint);
+    }
+    if (entries.some((d: any) => d.id === input("local-model").value))
+      select.value = input("local-model").value;
+    showStatus(
+      "local-models-status",
+      `已读取 ${entries.length} 个本地部署。可选择列表项，也可手动填写 ID。`,
+    );
+  },
+  "local-models-status",
+);
 $("local-model-select").addEventListener("change", () => {
-  input("local-model").value = $<HTMLSelectElement>("local-model-select").value;
+  const value = $<HTMLSelectElement>("local-model-select").value;
+  if (value) {
+    input("local-model").value = value;
+    input("local-model").dispatchEvent(new Event("input", { bubbles: true }));
+  }
 });
 function draft() {
   return {
@@ -152,96 +182,196 @@ function draft() {
     intervalMs: Number(input("interval").value) * 1000,
     timeoutMs: Number(input("timeout").value) * 1000,
     concurrency: Number(input("concurrency").value),
-    mode: input("mode").value,
     batch: input("batch").checked,
-    budgetBytes: Number(input("budget").value) * 1024 * MiB,
-    releaseRepo: input("release-repo").value.trim(),
   };
 }
-async function grant(url: string) {
+async function grant(url: string, trace = newTrace()) {
   const origin = new URL(url).origin;
+  void record(trace, "permission.start", { outcome: "started" });
   const yes = await chrome.permissions.request({ origins: [origin + "/*"] });
+  void record(trace, "permission.end", {
+    outcome: yes ? "success" : "failed",
+    reason: yes ? undefined : "PERMISSION_DENIED",
+  });
   if (!yes) throw Error("请完成域名授权。");
 }
-bind("save", async () => {
+bind("save", async (t: Trace) => {
+  const { send, db } = scoped(t);
+
+  const savedDraft = drafts.snapshot();
   const c = draft();
-  if (c.routing !== "local-only") await grant(c.apiUrl);
-  if (c.routing !== "cloud-only") await grant(c.localUrl);
-  await send("SAVE", { config: c, trace: newTrace() });
+  if (c.routing !== "local-only") await grant(c.apiUrl, t);
+  if (c.routing !== "cloud-only") await grant(c.localUrl, t);
+  await send("SAVE", { config: c, trace: t });
+  drafts.clear(serviceFields, savedDraft);
   show(await send("PRIVATE"));
   showStatus("status", "✓ 配置已保存，并回读核对。");
 });
-bind("reload-config", async () => {
+bind("reload-config", async (t: Trace) => {
+  const { send, db } = scoped(t);
+
+  if (
+    drafts.any() &&
+    !(await confirmAction("重新读取将放弃翻译服务中尚未保存的更改。"))
+  )
+    return;
+  drafts.clear(serviceFields);
   show(await send("PRIVATE"));
   showStatus("status", "✓ 已重新读取配置。");
 });
-bind("test", async () => {
-  const c = draft();
-  if (c.routing !== "local-only") await grant(c.apiUrl);
-  if (c.routing !== "cloud-only") await grant(c.localUrl);
-  showStatus("status", "正在测试连接…");
-  await send("TEST", { config: c, trace: newTrace() });
-  showStatus("status", "✓ 连接与译文校验成功。");
-});
-input("progress-visible").addEventListener("change", () => {
-  void send("DISPLAY", { visible: input("progress-visible").checked }).catch(
-    (e) => showStatus("status", e.message),
-  );
-});
+bind(
+  "test",
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    const c = draft();
+    if (c.routing !== "local-only") await grant(c.apiUrl, t);
+    if (c.routing !== "cloud-only") await grant(c.localUrl, t);
+    showStatus("connection-test-status", "正在测试连接…");
+    await send("TEST", { config: c, trace: t });
+    showStatus("connection-test-status", "✓ 连接与译文校验成功。");
+  },
+  "connection-test-status",
+);
+bind(
+  "reading-save",
+  async (t) => {
+    const { send } = scoped(t);
+    await send("SAVE", { config: { mode: input("mode").value } });
+    drafts.clear(["mode"]);
+    showStatus("reading-status", "阅读方式已保存，下次翻译时生效。");
+  },
+  "reading-status",
+);
+for (const id of ["theme", "progress-visible"])
+  input(id).addEventListener("change", () => {
+    void runOperation("preferences", async (t) => {
+      const { send } = scoped(t);
+      const theme = input("theme").value;
+      await send("PREFERENCES", {
+        theme,
+        visible: input("progress-visible").checked,
+      });
+      drafts.clear([id]);
+      applyTheme(theme);
+      showStatus("reading-status", "外观与进度显示已保存。");
+    }).catch((e) => showStatus("reading-status", e.message));
+  });
+const serviceFields = [
+  "api-url",
+  "routing",
+  "local-url",
+  "local-token",
+  "clear-local-token",
+  "local-model",
+  "local-backend",
+  "local-auto-start",
+  "api-key",
+  "clear-key",
+  "model",
+  "interval",
+  "timeout",
+  "concurrency",
+  "batch",
+];
 const human = (n: number) =>
-  n >= 1024 * MiB
-    ? (n / (1024 * MiB)).toFixed(2) + " GiB"
-    : n >= MiB
-      ? (n / MiB).toFixed(2) + " MiB"
-      : n.toLocaleString() + " B";
-async function stats() {
+  !Number.isFinite(n)
+    ? "未知"
+    : n >= 1024 * MiB
+      ? (n / (1024 * MiB)).toFixed(2) + " GiB"
+      : n >= MiB
+        ? (n / MiB).toFixed(2) + " MiB"
+        : n.toLocaleString() + " B";
+async function stats(t = newTrace()) {
+  const { db } = scoped(t);
   try {
-    const s = await db("status");
+    const s: CacheStatus = await db("status");
+    $("cache-summary").replaceChildren();
+    for (const [name, value] of [
+      ["数据库占用", human(s.dbBytes)],
+      ["待写入", s.pending == null ? "未知" : `${s.pending} 条`],
+      ["写回状态", s.writeError ? "需要处理" : "就绪"],
+    ]) {
+      const item = document.createElement("div"),
+        label = document.createElement("span"),
+        number = document.createElement("strong");
+      label.textContent = name;
+      number.textContent = value;
+      item.append(label, number);
+      $("cache-summary").append(item);
+    }
     showStatus(
       "db-stats",
-      `SQLite / OPFS 已连接\n云端模型：${s.modelEntries.toLocaleString()} 条 · 本地模型：${s.localModelEntries.toLocaleString()} 条 / ${human(s.localModelBytes)}（上限 256 MiB）\n修订：${s.revisions.toLocaleString()} 条\n数据库：${human(s.dbBytes)} · 可复用空闲：${human(s.freeBytes)}\n压缩块：${human(s.blockBytes)} / 原始 ${human(s.rawBytes)}\n待写：${s.pending} 条 / ${human(s.pendingBytes)}${s.writeError ? "\n自动写回已暂停：" + s.writeError + "。腾出空间后点击立即提交重试。" : ""}\n热缓存 ${human(s.hotBytes)} · 解压块 ${human(s.decodedBytes)}\n本次 Worker 应用提交：${human(s.metrics.submittedBytes)}（不等于 SSD 物理擦写）\n维护提交：${human(s.metrics.maintenanceBytes)}`,
+      `SQLite / OPFS 已连接\n云端模型：${s.modelEntries?.toLocaleString() ?? "未知"} 条 · 本地模型：${s.localModelEntries?.toLocaleString() ?? "未知"} 条 / ${human(s.localModelBytes)}（上限 256 MiB）\n修订：${s.revisions?.toLocaleString() ?? "未知"} 条\n数据库：${human(s.dbBytes)} · 可复用空闲：${human(s.freeBytes)}\n压缩块：${human(s.blockBytes)} / 原始 ${human(s.rawBytes)}\n待写：${s.pending} 条 / ${human(s.pendingBytes)}${s.writeError ? "\n自动写回已暂停：" + s.writeError + "。腾出空间后点击立即提交重试。" : ""}\n热缓存 ${human(s.hotBytes)} · 解压块 ${human(s.decodedBytes)}\n本次 Worker 应用提交：${human(s.metrics.submittedBytes)}（不等于 SSD 物理擦写）\n维护提交：${human(s.metrics.maintenanceBytes)}`,
     );
     $("pack-list").replaceChildren();
+    if (!s.packs.length)
+      empty($("pack-list"), "暂无词库。导入后即可离线复用译文。");
     for (const p of s.packs) {
       const row = document.createElement("div");
       row.className = "pack";
       const label = document.createElement("p");
-      label.textContent = `${p.id} · 当前 v${p.active} · 上一版 ${p.previous ? "v" + p.previous : "无"} · ${p.source_lang} → ${p.target_lang} · ${p.domain}`;
+      label.textContent = `${p.enabled ? "已启用" : "已停用"} · ${p.id} · 当前 v${p.active} · 上一版 ${p.previous ? "v" + p.previous : "无"} · ${p.source_lang} → ${p.target_lang} · ${p.domain}`;
       row.append(label);
       for (const [title, op, confirm] of [
         ["回滚", "rollback", false],
         ["删除词库", "deletePack", true],
         ...(p.staging ? [["中止暂存 v" + p.staging, "abortPack", false]] : []),
       ] as [string, string, boolean][]) {
-        const b = document.createElement("button");
+        const b = button("");
         b.textContent = title;
-        b.onclick = async () => {
-          if (
-            confirm &&
-            !window.confirm("删除 " + p.id + "？用户修订和其他词库不受影响。")
-          )
-            return;
-          try {
-            let r;
-            do {
-              r = await db(op, [p.id]);
-              showStatus("pack-status", "正在分批处理 " + p.id);
-            } while (r?.more);
-            await stats();
-          } catch (e) {
-            showStatus("pack-status", (e as Error).message);
-          }
+        b.disabled = op === "rollback" && (!p.previous || !!p.staging);
+        b.onclick = (event) => {
+          const control = event.currentTarget as HTMLButtonElement;
+          if (control.disabled) return;
+          control.disabled = true;
+          void runOperation("list-action", async (t: Trace) => {
+            const { send, db } = scoped(t);
+
+            if (
+              confirm &&
+              !(await confirmAction(
+                "删除 " + p.id + "？用户修订和其他词库不受影响。",
+              ))
+            )
+              return;
+            try {
+              let r;
+              do {
+                r = await db(op, [p.id]);
+                showStatus("pack-status", "正在分批处理 " + p.id);
+              } while (r?.more);
+              await stats(t);
+            } catch (e) {
+              showStatus("pack-status", (e as Error).message);
+            }
+          })
+            .catch((e) => showStatus("pack-status", e.message))
+            .finally(() => {
+              control.disabled = false;
+            });
         };
         row.append(b);
       }
-      const toggle = document.createElement("button");
+      const toggle = button("");
       toggle.textContent = p.enabled ? "停用" : "启用";
-      toggle.onclick = async () => {
-        await db("configurePack", [
-          p.id,
-          { enabled: !p.enabled, priority: p.priority },
-        ]);
-        await stats();
+      toggle.onclick = (event) => {
+        const control = event.currentTarget as HTMLButtonElement;
+        if (control.disabled) return;
+        control.disabled = true;
+        void runOperation("list-action", async (t: Trace) => {
+          const { send, db } = scoped(t);
+
+          await db("configurePack", [
+            p.id,
+            { enabled: !p.enabled, priority: p.priority },
+          ]);
+          await stats(t);
+        })
+          .catch((e) => showStatus("pack-status", e.message))
+          .finally(() => {
+            control.disabled = false;
+          });
       };
       row.append(toggle);
       $("pack-list").append(row);
@@ -257,43 +387,53 @@ async function stats() {
 bind("stats-refresh", stats, "storage-status");
 bind(
   "budget-save",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     await send("SAVE", {
       config: { budgetBytes: Number(input("budget").value) * 1024 * MiB },
-      trace: newTrace(),
+      trace: t,
     });
+    drafts.clear(["budget"]);
     showStatus("storage-status", "预算已保存");
-    await stats();
+    await stats(t);
   },
   "storage-status",
 );
 bind(
   "flush",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     await db("flush");
-    await stats();
+    await stats(t);
   },
   "storage-status",
 );
 bind(
   "clear-model",
-  async () => {
-    if (!confirm("清理模型缓存？词库与用户修订将保留。")) return;
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    if (!(await confirmAction("清理模型缓存？词库与用户修订将保留。"))) return;
     let r;
     do {
       r = await db("clearModels");
       showStatus("storage-status", "正在分批清理模型索引…");
     } while (r.more);
-    await stats();
+    await stats(t);
   },
   "storage-status",
 );
 bind(
   "collect",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     maintenance = true;
+    maintenanceTrace = t;
     let total = 0;
-    const trace = newTrace();
+    const trace = t;
     while (maintenance) {
       const r = await db("collect", [], trace);
       total += r.bytes;
@@ -305,13 +445,18 @@ bind(
       await new Promise((r) => setTimeout(r, 100));
     }
     maintenance = false;
-    await stats();
+    await stats(t);
   },
   "storage-status",
 );
 $("collect-stop").onclick = () => {
   maintenance = false;
-  void db("maintenanceStop").catch((e) =>
+  const trace = maintenanceTrace || newTrace();
+  void record(trace, "ui.cancel", {
+    outcome: "cancelled",
+    resourceId: "maintenance",
+  });
+  void db("maintenanceStop", [], trace).catch((e) =>
     showStatus("storage-status", e.message),
   );
   showStatus("storage-status", "当前批次完成后停止维护");
@@ -396,16 +541,17 @@ async function importStream(
     throw e;
   } finally {
     await reader.return(undefined);
-    await stats();
+    await stats(t);
   }
 }
 async function importingRun(
   run: (signal: AbortSignal, t: Trace) => Promise<void>,
+  t = newTrace(),
 ) {
   if (importing) throw Error("已有导入在运行");
   importing = new AbortController();
-  const t = newTrace(),
-    started = performance.now();
+  importTrace = t;
+  const started = performance.now();
   await send("TRACE", {
     trace: t,
     event: "operation.start",
@@ -443,21 +589,30 @@ async function importingRun(
 }
 bind(
   "import-local",
-  () =>
-    importingRun(async (signal, t) => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+    return importingRun(async (signal, t) => {
       const file = input("pack-file").files?.[0];
       if (!file) throw Error("请选择词库文件");
       await importStream(file.stream(), file.name.endsWith(".gz"), signal, t);
-    }),
+    }, t);
+  },
   "pack-status",
 );
-$("import-stop").onclick = () => importing?.abort();
+$("import-stop").onclick = () => {
+  if (importing && importTrace)
+    void record(importTrace, "ui.cancel", {
+      outcome: "cancelled",
+      resourceId: "pack-import",
+    });
+  importing?.abort();
+};
 async function sourceFetch(signal: AbortSignal, t: Trace) {
   const url = input("pack-url").value;
   const u = new URL(url);
   if (u.protocol !== "https:" || u.username || u.password)
     throw Error("词库来源必须是无账号密码的 HTTPS 地址");
-  await grant(url);
+  await grant(url, t);
   const span = childTrace(t),
     start = performance.now(),
     requestId = crypto.randomUUID();
@@ -507,18 +662,22 @@ async function sourceFetch(signal: AbortSignal, t: Trace) {
 }
 bind(
   "source-save",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     const u = new URL(input("pack-url").value);
     if (u.protocol !== "https:") throw Error("仅支持 HTTPS");
     await chrome.storage.local.set({ "pack.source": u.href });
+    drafts.clear(["pack-url"]);
     showStatus("pack-status", "来源已保存在本设备；更新仅手动发起");
   },
   "pack-status",
 );
 bind(
   "source-check",
-  async () => {
-    const t = newTrace();
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     await send("TRACE", {
       trace: t,
       event: "operation.start",
@@ -555,11 +714,13 @@ bind(
 );
 bind(
   "import-url",
-  () =>
-    importingRun(async (signal, t) => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+    return importingRun(async (signal, t) => {
       const r = await sourceFetch(signal, t);
       await importStream(r.response.body!, r.gzip, signal, t);
-    }),
+    }, t);
+  },
   "pack-status",
 );
 function revisionInput(): CacheInput {
@@ -573,42 +734,55 @@ function revisionInput(): CacheInput {
 }
 bind(
   "revision-save",
-  async () => {
-    showStatus(
-      "revision-result",
-      await db("revision", [
-        {
-          ...revisionInput(),
-          translation: input("revision-translation").value,
-        },
-      ]),
-    );
-    await stats();
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    await db("revision", [
+      { ...revisionInput(), translation: input("revision-translation").value },
+    ]);
+    drafts.clear([
+      "revision-language",
+      "revision-target",
+      "revision-domain",
+      "revision-source",
+      "revision-translation",
+    ]);
+    showStatus("revision-result", "修订已保存，将优先用于后续翻译。");
+    await stats(t);
   },
   "revision-result",
 );
 bind(
   "revision-history",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     const rows = await db("revisionHistory", [revisionInput()]);
     $("revision-result").replaceChildren();
+    if (!rows.length) empty($("revision-result"), "这段原文还没有修订历史。");
     for (const row of rows) {
       const line = document.createElement("div");
-      const b = document.createElement("button");
+      const b = button("");
       b.textContent =
         "恢复 v" + row.revision + " · " + new Date(row.time).toLocaleString();
-      b.onclick = async () => {
-        try {
+      b.onclick = () => {
+        if (b.disabled) return;
+        b.disabled = true;
+        void runOperation("revision-restore", async (t) => {
+          const { db } = scoped(t);
           const entry = await db("readRevision", [
             revisionInput(),
             row.revision,
           ]);
           await db("revision", [entry]);
           input("revision-translation").value = entry.translation;
+          drafts.clear(["revision-translation"]);
           showStatus("revision-result", "已恢复为新修订版本");
-        } catch (e) {
-          showStatus("revision-result", (e as Error).message);
-        }
+        })
+          .catch((e) => showStatus("revision-result", e.message))
+          .finally(() => {
+            b.disabled = false;
+          });
       };
       line.append(b);
       $("revision-result").append(line);
@@ -618,27 +792,38 @@ bind(
 );
 bind(
   "revision-clear",
-  async () => {
-    if (!confirm("清除全部用户修订及其历史？此操作不能撤销。")) return;
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    if (!(await confirmAction("清除全部用户修订及其历史？此操作不能撤销。")))
+      return;
     let r;
     do {
       r = await db("clearRevisions");
     } while (r.more);
-    await stats();
+    await stats(t);
   },
   "revision-result",
 );
 let traceOffset = 0;
-async function traceRead(all = false) {
-  const r = await send("TRACE_READ", {
+async function traceRead(all = false, t = newTrace()) {
+  const { send } = scoped(t);
+  const r: TracePage = await send("TRACE_READ", {
     traceId: input("trace-id").value.trim(),
     batchId: input("batch-id").value.trim(),
     ...(all ? {} : { limit: 200, offset: traceOffset }),
   });
-  if (!all) showStatus("trace-results", r.events);
+  if (!all)
+    records(
+      $("trace-results"),
+      [...r.events].reverse(),
+      (e) =>
+        `${new Date(e.time).toLocaleString()} · ${e.event} · ${e.outcome}${e.durationMs == null ? "" : ` · ${e.durationMs} ms`}`,
+      "没有匹配的诊断记录。",
+    );
   showStatus(
     "trace-summary",
-    `${all ? "导出" : `第 ${Math.floor(traceOffset / 200) + 1} 页，最近优先`} ${r.events.length} 条 · 内存待提交 ${r.stats.pending} 条 · 诊断提交 ${r.stats.flushes} 次 / ${human(r.stats.diagnosticSubmittedBytes || 0)} · 丢弃 ${r.stats.dropped} 条；供应商无请求 ID 时不可关联`,
+    `${all ? "导出" : `第 ${Math.floor(traceOffset / 200) + 1} 页，最近优先`} ${r.events.length} 条 · 内存待提交 ${r.stats.pending} 条 · 诊断提交 ${r.stats.flushes} 次 / ${human(r.stats.diagnosticSubmittedBytes as number)} · 丢弃 ${r.stats.dropped} 条；供应商无请求 ID 时不可关联`,
   );
   if (!all) {
     $<HTMLButtonElement>("trace-newer").disabled = traceOffset === 0;
@@ -650,41 +835,51 @@ async function traceRead(all = false) {
 }
 bind(
   "trace-search",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     traceOffset = 0;
-    return traceRead();
+    return traceRead(false, t);
   },
   "trace-summary",
 );
 bind(
   "trace-newer",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     traceOffset = Math.max(0, traceOffset - 200);
-    return traceRead();
+    return traceRead(false, t);
   },
   "trace-summary",
 );
 bind(
   "trace-older",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     traceOffset += 200;
-    return traceRead();
+    return traceRead(false, t);
   },
   "trace-summary",
 );
 bind(
   "trace-clear",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     await send("TRACE_CLEAR");
     traceOffset = 0;
-    await traceRead();
+    await traceRead(false, t);
   },
   "trace-summary",
 );
 bind(
   "trace-export",
-  async () => {
-    const r = await traceRead(true);
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
+    const r = await traceRead(true, t);
     const a = document.createElement("a"),
       url = URL.createObjectURL(
         new Blob(
@@ -711,20 +906,25 @@ bind(
 );
 bind(
   "release-check",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     await send("SAVE", {
       config: { releaseRepo: input("release-repo").value.trim() },
     });
     const r = await send("RELEASE", {
       repo: input("release-repo").value.trim(),
     });
+    drafts.clear(["release-repo"]);
     renderRelease($("release-result"), r);
   },
   "release-result",
 );
 bind(
   "migrate",
-  async () => {
+  async (t: Trace) => {
+    const { send, db } = scoped(t);
+
     const r = await send("MIGRATE", { code: input("migration-code").value });
     input("migration-code").value = "";
     show(await send("PRIVATE"));
@@ -732,21 +932,55 @@ bind(
       "migration-status",
       `✓ 已迁移，Key ${r.hasKey ? "已保留" : "未配置"}；${r.cacheBuckets} 个旧缓存分区。请重新保存并授权 API 地址。`,
     );
-    await stats();
+    await stats(t);
   },
   "migration-status",
 );
-void (async () => {
+void runOperation("settings-load", async (t) => {
+  const { send } = scoped(t);
   show(await send("PRIVATE"));
   const d = await chrome.storage.local.get("pack.source");
   input("pack-url").value = d["pack.source"] || "";
-})().catch((e) => showStatus("status", e.message));
-let storageLoaded = false;
+}).catch((e) => showStatus("status", e.message));
+const loaded = new Set<string>();
+const pages: Record<string, [string, string]> = {
+  service: ["翻译服务", "选择文字的去向，保留阅读的节奏。"],
+  reading: ["阅读与网站", "让翻译按你的阅读习惯出现。"],
+  storage: ["本地缓存", "查看空间与写回状态，按需维护。"],
+  packs: ["词库与修订", "让可靠的译文在下一次阅读中复用。"],
+  diagnostic: ["诊断", "从一次操作追溯结果，按需展开技术详情。"],
+  update: ["更新与迁移", "检查版本，保留本机的配置与数据。"],
+};
 function loadSection() {
-  if (!storageLoaded && ["#storage", "#packs"].includes(location.hash)) {
-    storageLoaded = true;
-    void stats();
+  const name = location.hash.slice(1) || "service",
+    selected = pages[name] ? name : "service";
+  for (const page of document.querySelectorAll<HTMLElement>("main > .page"))
+    page.hidden = page.id !== selected;
+  for (const link of document.querySelectorAll<HTMLAnchorElement>("nav a")) {
+    if (link.hash === "#" + selected) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  $("page-title").textContent = pages[selected][0];
+  $("page-summary").textContent = pages[selected][1];
+  if (["storage", "packs"].includes(selected) && !loaded.has(selected)) {
+    loaded.add(selected);
+    void runOperation("load-" + selected, stats).catch((e) => {
+      loaded.delete(selected);
+      showStatus(
+        selected === "packs" ? "pack-status" : "storage-status",
+        e.message,
+      );
+    });
   }
 }
 addEventListener("hashchange", loadSection);
+document.addEventListener("input", () => {
+  $("draft-state").hidden = !drafts.any();
+});
+window.addEventListener("beforeunload", (e) => {
+  if (drafts.any()) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
 loadSection();

@@ -347,6 +347,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         data = await chrome.storage.local.get([
           "sites",
           "ui.progressVisible",
+          "ui.theme",
           "ui.position",
         ]);
       return {
@@ -364,6 +365,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         ),
         auto: !!data.sites?.[origin(s)],
         progressVisible: data["ui.progressVisible"] !== false,
+        theme: data["ui.theme"] || "system",
         position: data["ui.position"],
       };
     }
@@ -431,6 +433,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
           ...(await chrome.storage.local.get([
             "sites",
             "ui.progressVisible",
+            "ui.theme",
             "migration.result",
           ])),
         };
@@ -446,7 +449,23 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
               JSON.stringify(loaded) === JSON.stringify(c),
               "CONFIG_VERIFY_FAILED",
             );
-            for (const job of jobs.values()) cancel(job.tab);
+            const affectsTranslation = [
+              "apiUrl",
+              "apiKey",
+              "model",
+              "routing",
+              "localUrl",
+              "localToken",
+              "localModel",
+              "localBackend",
+              "localAutoStart",
+              "intervalMs",
+              "timeoutMs",
+              "concurrency",
+              "batch",
+            ].some((key) => key in m.config);
+            if (affectsTranslation)
+              for (const job of jobs.values()) cancel(job.tab);
             await storage("setBudget", [c.budgetBytes], t);
             return publicConfig(loaded);
           });
@@ -473,6 +492,19 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
           new AbortController().signal,
           () => {},
         ).then(() => ({ connected: true }));
+        break;
+      }
+      case "PREFERENCES": {
+        requireValue(
+          ["system", "light", "dark"].includes(m.theme) &&
+            typeof m.visible === "boolean",
+          "INVALID_PREFERENCES",
+        );
+        await chrome.storage.local.set({
+          "ui.theme": m.theme,
+          "ui.progressVisible": m.visible,
+        });
+        result = { saved: true };
         break;
       }
       case "DISPLAY":
@@ -536,7 +568,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         });
         break;
       case "TRACE_CLEAR":
-        result = await storage("trace.clear");
+        result = await storage("trace.clear", [], t);
         break;
       case "RELEASE":
         result = await fetchRelease(

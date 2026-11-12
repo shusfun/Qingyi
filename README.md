@@ -1,6 +1,6 @@
-# 轻译 3.0
+# 轻译 3.1
 
-轻量 Chromium MV3 网页翻译扩展。入口为网页右键菜单和设置页，网页仅显示可关闭的小进度条。暖米白、炭黑、陶土橙配色。
+轻量 Chromium MV3 网页翻译扩展。入口为网页右键菜单和设置页，网页仅显示可关闭的小进度条。暖米白、炭黑、陶土橙配色，支持浅色、深色和跟随系统。设置分为翻译服务、阅读与网站、本地缓存、词库与修订、诊断、更新与迁移，分区保存并保留未保存草稿。
 
 [下载当前版本](https://github.com/shusfun/Qingyi/releases/latest) · [本地模型接入指南](docs/local-model.md) · [独立管理器 mistral-gui](https://github.com/shusfun/mistral-gui)
 

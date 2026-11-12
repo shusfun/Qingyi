@@ -10,7 +10,13 @@ import {
 } from "./ui/components.js";
 import type { SettingsView, CacheStatus, TracePage } from "./ui/models";
 import { newTrace, childTrace, traceparent } from "./trace";
-import { MiB, type Trace, type CacheInput, type PackManifest } from "./types";
+import {
+  DEFAULTS,
+  MiB,
+  type Trace,
+  type CacheInput,
+  type PackManifest,
+} from "./types";
 import { lines } from "./codec";
 import { renderRelease } from "./releases-view";
 import { singleTextModel } from "./model-profile";
@@ -45,9 +51,27 @@ function bind(
     try {
       await runOperation(id, action);
     } catch (e) {
-      showStatus(status, "操作未完成，请检查设置或权限后重试。");
+      const connectionFailure =
+        status === "connection-test-status" ? localConnectionError(e) : null;
+      showStatus(
+        status,
+        status.startsWith("release-")
+          ? releaseError(e)
+          : (connectionFailure?.message ??
+              "操作未完成，请检查设置或权限后重试."),
+      );
       $(status).setAttribute("role", "alert");
       $(status).dataset.tone = "error";
+      if (connectionFailure?.managerUrl) {
+        const link = document.createElement("a");
+        link.href = connectionFailure.managerUrl;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = document.documentElement.lang.startsWith("en")
+          ? "Open deployment connection details"
+          : "打开管理器的部署连接信息";
+        $(status).append(" ", link);
+      }
       const detail = details(
         "查看错误原因",
         e instanceof Error ? e.message : "操作失败",
@@ -60,6 +84,25 @@ function bind(
       $("draft-state").hidden = !drafts.any();
     }
   });
+}
+function localConnectionError(error: unknown) {
+  const code = error instanceof Error ? error.message : "";
+  if (/LOCAL_HTTP_(401|403)|invalid_token/i.test(code)) {
+    const english = document.documentElement.lang.startsWith("en");
+    let managerUrl: string | undefined;
+    try {
+      managerUrl = new URL("/manage#instances", input("local-url").value).href;
+    } catch {
+      // Keep the recovery instructions even when the configured URL is malformed.
+    }
+    return {
+      message: english
+        ? "The manager rejected this token. Copy the current token from the deployment connection details and retry."
+        : "管理器拒绝了此 Token。请从部署连接信息复制当前 Token 后重试。",
+      managerUrl,
+    };
+  }
+  return null;
 }
 function show(c: SettingsView) {
   const savedDrafts = drafts.snapshot();
@@ -89,6 +132,7 @@ function show(c: SettingsView) {
   input("batch").checked = c.batch;
   input("budget").value = String(c.budgetBytes / (1024 * MiB));
   input("release-repo").value = c.releaseRepo;
+  $("release-source").textContent = "当前更新源：" + c.releaseRepo;
   input("progress-visible").checked = c["ui.progressVisible"] !== false;
   showStatus(
     "key-state",
@@ -907,19 +951,57 @@ bind(
 bind(
   "release-check",
   async (t: Trace) => {
-    const { send, db } = scoped(t);
-
-    await send("SAVE", {
-      config: { releaseRepo: input("release-repo").value.trim() },
-    });
-    const r = await send("RELEASE", {
-      repo: input("release-repo").value.trim(),
-    });
-    drafts.clear(["release-repo"]);
+    const { send } = scoped(t);
+    showStatus("release-result", "正在检查更新…");
+    const r = await send("RELEASE");
     renderRelease($("release-result"), r);
   },
   "release-result",
 );
+function releaseError(error: unknown): string {
+  const code = error instanceof Error ? error.message : "";
+  if (code.includes("INVALID_REPOSITORY"))
+    return "更新源格式不正确。请填写 owner/repo，或点击“恢复官方源”。";
+  if (
+    code.includes("RELEASE_RATE_LIMITED") ||
+    code.includes("RELEASE_HTTP_429")
+  )
+    return "GitHub 请求次数已达上限，请稍后点击“检查更新”重试。";
+  if (code.includes("RELEASE_HTTP_404"))
+    return "未找到仓库或已发布版本。请检查自定义更新源，或恢复官方源后重试。";
+  if (/RELEASE_HTTP_40[13]|PERMISSION|OPTIONS_PAGE_REQUIRED/.test(code))
+    return "更新请求被拒绝。请检查浏览器授权或网络访问限制，再重试。";
+  if (/INVALID_RELEASE|EMPTY_RELEASE|DECOMPRESS_LIMIT/.test(code))
+    return "更新源返回的版本信息不完整。请稍后重试，或恢复官方源。";
+  return "暂时无法连接更新源。请检查网络后重试；已保存的设置保持不变。";
+}
+for (const [id, reset] of [
+  ["release-save", false],
+  ["release-reset", true],
+] as const) {
+  bind(
+    id,
+    async (trace) => {
+      const value = reset
+        ? DEFAULTS.releaseRepo
+        : input("release-repo").value.trim() || DEFAULTS.releaseRepo;
+      const saved = drafts.snapshot();
+      const c = await scoped(trace).send("SAVE", {
+        config: { releaseRepo: value },
+      });
+      drafts.clear(["release-repo"], saved);
+      if (!drafts.has("release-repo"))
+        input("release-repo").value = c.releaseRepo;
+      config.releaseRepo = c.releaseRepo;
+      $("release-source").textContent = "当前更新源：" + c.releaseRepo;
+      showStatus(
+        "release-source-status",
+        reset ? "已恢复官方更新源。" : "更新源已保存。",
+      );
+    },
+    "release-source-status",
+  );
+}
 bind(
   "migrate",
   async (t: Trace) => {

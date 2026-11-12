@@ -140,6 +140,14 @@ export async function fetchRelease(
       },
     );
     status = response.status;
+    requireValue(
+      !(
+        status === 429 ||
+        (status === 403 &&
+          response.headers.get("x-ratelimit-remaining") === "0")
+      ),
+      "RELEASE_RATE_LIMITED",
+    );
     requireValue(response.ok, "RELEASE_HTTP_" + status);
     requireValue(response.body, "EMPTY_RELEASE_RESPONSE");
     const bytes = await streamBytes(response.body, 2 * 1024 * 1024),

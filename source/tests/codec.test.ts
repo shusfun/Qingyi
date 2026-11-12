@@ -31,6 +31,27 @@ test("configuration preserves blank keys without carrying command fields", () =>
   assert.equal(configFrom({ clearKey: true }, old).apiKey, "");
   assert.throws(() => configFrom({ model: "" }, old), /INVALID_MODEL/);
 });
+test("empty legacy update sources recover the official repository without changing credentials", () => {
+  for (const releaseRepo of [undefined, "", "  "]) {
+    const c = configFrom({
+      ...DEFAULTS,
+      releaseRepo,
+      apiKey: "cloud",
+      localToken: "local",
+    });
+    assert.equal(c.releaseRepo, "shusfun/Qingyi");
+    assert.equal(c.apiKey, "cloud");
+    assert.equal(c.localToken, "local");
+  }
+  assert.equal(
+    configFrom({ releaseRepo: " custom/fork " }).releaseRepo,
+    "custom/fork",
+  );
+  assert.throws(
+    () => configFrom({ releaseRepo: "https://github.com/custom/fork" }),
+    /INVALID_REPOSITORY/,
+  );
+});
 test("partial batches salvage valid IDs while rejecting duplicate and missing placeholders", () => {
   assert.deepEqual(
     parseBatch(

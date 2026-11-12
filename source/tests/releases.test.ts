@@ -4,6 +4,19 @@ import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { fetchRelease, parseRelease } from "../src/releases";
 import { newTrace } from "../src/trace";
+test("release checks distinguish rate limits from permission failures", async () => {
+  await assert.rejects(
+    fetchRelease("shusfun/Qingyi", "3.1.0", newTrace(), {
+      fetch: async () =>
+        new Response("", {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      record: () => {},
+    }),
+    /RELEASE_RATE_LIMITED/,
+  );
+});
 const zip = Buffer.from("PK\x03\x04Qingyi isolated release fixture"),
   digest = createHash("sha256").update(zip).digest("hex"),
   filename = "qingyi-3.0.0-chromium.zip";

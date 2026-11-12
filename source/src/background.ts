@@ -572,7 +572,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         break;
       case "RELEASE":
         result = await fetchRelease(
-          m.repo,
+          m.repo === undefined ? (await config()).releaseRepo : m.repo,
           chrome.runtime.getManifest().version,
           t,
           { record },

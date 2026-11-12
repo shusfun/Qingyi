@@ -311,15 +311,24 @@
         </section>
         <section class="page panel" id="update">
           <h2>更新与迁移</h2>
-          <label
-            >GitHub owner/repo<input
-              id="release-repo"
-              placeholder="owner/qingyi"
-          /></label>
+          <p id="release-source" class="hint"></p>
           <div class="actions">
-            <button id="release-check">检查最新 Release</button>
+            <button id="release-check">检查更新</button>
           </div>
           <div id="release-result"></div>
+          <details>
+            <summary>高级：自定义更新源</summary>
+            <label
+              >GitHub 仓库（owner/repo）<input
+                id="release-repo"
+                placeholder="shusfun/Qingyi"
+            /></label>
+            <div class="actions">
+              <button id="release-save">保存更新源</button>
+              <button id="release-reset">恢复官方源</button>
+            </div>
+            <p id="release-source-status" role="status"></p>
+          </details>
           <p class="hint">
             手动下载 ZIP 与 SHA-256
             后，核对摘要，替换安装目录，再到扩展管理页重新加载。插件不会自动执行下载文件或覆盖本地目录。

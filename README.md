@@ -4,9 +4,9 @@
 
 [下载当前版本](https://github.com/shusfun/Qingyi/releases/latest) · [本地模型接入指南](docs/local-model.md) · [独立管理器 mistral-gui](https://github.com/shusfun/mistral-gui)
 
-本地设置支持刷新管理器部署列表并选择实例，也可手动填写部署 ID。mistral-gui 使用 Wails 窗口，关闭缩到托盘，明确退出才停止全部模型；各部署独立启停。缓存同时隔离模型 revision 和部署参数。英文接入说明见 [Local model guide](docs/local-model.en.md)。
+本地接入：在 mistral-gui 选择模型并点击“部署并启动”，然后复制 OpenAI Base URL、部署 Model ID 和 Token 到这里。管理器会准备所需引擎并检查 API；已有资源会复用，各部署独立启停。设置页也支持刷新部署列表并选择实例。缓存按模型 revision 和部署参数隔离。英文接入说明见 [Local model guide](docs/local-model.en.md)。
 
-仓库维护 `source` 源码，`extension` 是本机唯一加载目录，`releases` 只保留当前版本 ZIP 与摘要。Git 不跟踪构建目录和浏览器个人数据。推送与 `source/package.json` 版本一致的 `vX.Y.Z` tag 后，Actions 检查并发布当前版本。新安装默认更新仓库为 `shusfun/Qingyi`；旧设置如留空，可在设置页手动填写。
+仓库维护 `source` 源码，`extension` 是本机唯一加载目录，`releases` 只保留当前版本 ZIP 与摘要。Git 不跟踪构建目录和浏览器个人数据。推送与 `source/package.json` 版本一致的 `vX.Y.Z` tag 后，Actions 检查并发布当前版本。更新源默认使用 `shusfun/Qingyi`；旧设置缺失或留空时也会恢复官方源，自定义仓库可在更新页高级设置中单独保存。
 
 ## 安装和构建
 

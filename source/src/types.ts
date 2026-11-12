@@ -164,7 +164,10 @@ export function configFrom(
     mode: raw.mode ?? previous.mode,
     batch: raw.batch ?? previous.batch,
     budgetBytes: raw.budgetBytes ?? previous.budgetBytes,
-    releaseRepo: raw.releaseRepo ?? previous.releaseRepo,
+    releaseRepo:
+      typeof raw.releaseRepo === "string"
+        ? raw.releaseRepo.trim() || DEFAULTS.releaseRepo
+        : previous.releaseRepo?.trim() || DEFAULTS.releaseRepo,
     routing: raw.routing ?? previous.routing ?? DEFAULTS.routing,
     localUrl: (raw.localUrl ?? previous.localUrl ?? DEFAULTS.localUrl).replace(
       /\/+$/,

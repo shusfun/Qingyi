@@ -72,6 +72,7 @@ export interface TraceSink {
     traceId?: string,
     batchId?: string,
     limit?: number,
+    offset?: number,
   ): Promise<TraceEvent[]>;
   clear(): Promise<void>;
   stats?(): Record<string, number>;
@@ -96,7 +97,7 @@ export class TraceBuffer {
     this.events.push(
       sanitizeTrace({
         ...trace,
-        time: this.now(),
+        time: typeof fields.time === "number" ? fields.time : this.now(),
         event,
         phase: event.split(".")[0],
         outcome: "complete",
@@ -111,6 +112,15 @@ export class TraceBuffer {
         },
         Math.max(0, this.lastFlush + this.interval - this.now(), this.interval),
       );
+  }
+  recordBatch(
+    items: { trace: Trace; event: string; fields?: Partial<TraceEvent> }[],
+  ) {
+    for (const item of items) {
+      if (validTrace(item.trace) && typeof item.event === "string") {
+        this.record(item.trace, item.event, item.fields || {});
+      }
+    }
   }
   async flush() {
     if (!this.events.length) return;
@@ -153,30 +163,83 @@ export class TraceBuffer {
         );
     }
   }
-  async read(traceId?: string, batchId?: string, limit?: number, offset = 0) {
+  async readPage(
+    traceId?: string,
+    batchId?: string,
+    limit?: number,
+    offset = 0,
+  ): Promise<{ events: TraceEvent[]; hasMore: boolean }> {
     await this.serial.catch(() => {});
+    const cleanTraceId = traceId || undefined;
+    const cleanBatchId = batchId || undefined;
     const bounded =
       limit == null ? undefined : Math.max(1, Math.min(200, Math.floor(limit)));
-    offset = Math.max(0, Math.min(50000, Math.floor(offset) || 0));
-    const rows = await this.sink.read(
-      traceId,
-      batchId,
-      bounded === undefined ? undefined : bounded + offset,
+    const safeOffset = Math.max(0, Math.min(50000, Math.floor(offset) || 0));
+
+    const pendingMatched = this.events.filter(
+      (e) =>
+        (!cleanTraceId || e.traceId === cleanTraceId) &&
+        (!cleanBatchId || e.batchId === cleanBatchId),
     );
-    const result = [
-      ...rows,
-      ...this.events.filter(
-        (e) =>
-          (!traceId || e.traceId === traceId) &&
-          (!batchId || e.batchId === batchId),
-      ),
-    ];
-    return bounded === undefined
-      ? result
-      : result.slice(
-          Math.max(0, result.length - offset - bounded),
-          Math.max(0, result.length - offset),
-        );
+
+    if (bounded === undefined) {
+      const rows = await this.sink.read(cleanTraceId, cleanBatchId);
+      return { events: [...rows, ...pendingMatched], hasMore: false };
+    }
+
+    const P = pendingMatched.length;
+    if (safeOffset < P) {
+      const startInPending = Math.max(0, P - safeOffset - bounded);
+      const endInPending = P - safeOffset;
+      const fromPending = pendingMatched.slice(startInPending, endInPending);
+      const hasOlderPending = startInPending > 0;
+      const needFromSink = bounded - fromPending.length;
+
+      if (needFromSink === 0) {
+        if (hasOlderPending) return { events: fromPending, hasMore: true };
+        const probe = await this.sink.read(cleanTraceId, cleanBatchId, 1, 0);
+        return { events: fromPending, hasMore: probe.length > 0 };
+      }
+
+      // Probe 1 extra row from sink to determine hasMore accurately (Q-02).
+      const sinkRows = await this.sink.read(
+        cleanTraceId,
+        cleanBatchId,
+        needFromSink + 1,
+        0,
+      );
+      const hasMore = sinkRows.length > needFromSink;
+      const takenSink = hasMore ? sinkRows.slice(1) : sinkRows;
+      return { events: [...takenSink, ...fromPending], hasMore };
+    }
+
+    const idbOffset = safeOffset - P;
+    if (this.sink.read.length >= 4) {
+      const sinkRows = await this.sink.read(
+        cleanTraceId,
+        cleanBatchId,
+        bounded + 1,
+        idbOffset,
+      );
+      const hasMore = sinkRows.length > bounded;
+      const events = hasMore ? sinkRows.slice(1) : sinkRows;
+      return { events, hasMore };
+    }
+
+    // Fallback for custom test mocks implementing 3-arg read(traceId, batchId, limit)
+    const rows = await this.sink.read(
+      cleanTraceId,
+      cleanBatchId,
+      bounded + idbOffset + 1,
+    );
+    const total = rows.length;
+    const end = Math.max(0, total - idbOffset);
+    const start = Math.max(0, end - bounded);
+    return { events: rows.slice(start, end), hasMore: start > 0 };
+  }
+  async read(traceId?: string, batchId?: string, limit?: number, offset = 0) {
+    const page = await this.readPage(traceId, batchId, limit, offset);
+    return page.events;
   }
   async clear() {
     clearTimeout(this.timer);

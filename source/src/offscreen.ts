@@ -14,8 +14,8 @@ const pending = new Map<
 worker.onmessage = (event) => {
   const m = event.data;
   if (m.kind === "trace") {
-    const [trace, event, fields] = m.args;
-    if (validTrace(trace)) traces.record(trace, event, fields);
+    const [trace, eventName, fields] = m.args;
+    if (validTrace(trace)) traces.record(trace, eventName, fields);
     return;
   }
   const waiter = pending.get(m.id);
@@ -68,16 +68,22 @@ chrome.runtime.onMessage.addListener((m, sender, respond) => {
       case "trace.record":
         if (validTrace(m.trace)) traces.record(m.trace, m.event, m.fields);
         return;
-      case "trace.read":
+      case "trace.recordBatch":
+        if (Array.isArray(m.events)) traces.recordBatch(m.events);
+        return;
+      case "trace.read": {
+        const page = await traces.readPage(
+          m.args?.[0],
+          m.args?.[1],
+          m.args?.[2],
+          m.args?.[3],
+        );
         return {
-          events: await traces.read(
-            m.args?.[0],
-            m.args?.[1],
-            m.args?.[2],
-            m.args?.[3],
-          ),
+          events: page.events,
+          hasMore: page.hasMore,
           stats: traces.stats(),
         };
+      }
       case "trace.clear":
         return traces.clear();
       default:

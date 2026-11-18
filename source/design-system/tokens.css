@@ -1,7 +1,8 @@
-/* Palette → semantics → materials. Components consume semantic and material tokens. */
+/* Palette -> semantics -> materials. Components consume only semantic and material tokens. */
 :root,
 :host {
   --palette-canvas: #f3efe7;
+  --palette-sunken: #eae4d8;
   --palette-panel: #faf7f0;
   --palette-raised: #fffdf7;
   --palette-ink: #302e29;
@@ -13,11 +14,15 @@
   --palette-good: #327052;
   --palette-bad: #b43e34;
   --palette-warn: #916019;
+  --palette-info: #56606b;
+
   --color-bg: var(--palette-canvas);
+  --color-sunken: var(--palette-sunken);
   --color-panel: var(--palette-panel);
   --color-raised: var(--palette-raised);
   --color-text: var(--palette-ink);
   --color-muted: var(--palette-muted);
+  --color-unknown: var(--palette-muted);
   --color-border: var(--palette-line);
   --color-accent: var(--palette-accent);
   --color-accent-soft: var(--palette-accent-soft);
@@ -25,9 +30,34 @@
   --color-success: var(--palette-good);
   --color-danger: var(--palette-bad);
   --color-warning: var(--palette-warn);
+  --color-info: var(--palette-info);
+  --color-success-soft: color-mix(
+    in srgb,
+    var(--color-success) 13%,
+    var(--color-panel)
+  );
+  --color-danger-soft: color-mix(
+    in srgb,
+    var(--color-danger) 13%,
+    var(--color-panel)
+  );
+  --color-warning-soft: color-mix(
+    in srgb,
+    var(--color-warning) 15%,
+    var(--color-panel)
+  );
+  --color-info-soft: color-mix(
+    in srgb,
+    var(--color-info) 13%,
+    var(--color-panel)
+  );
+
   --material-shadow: 0 5px 19px
     color-mix(in srgb, var(--color-text) 7%, transparent);
+  --material-shadow-strong: 0 11px 33px
+    color-mix(in srgb, var(--color-text) 15%, transparent);
   --material-overlay: color-mix(in srgb, var(--color-text) 35%, transparent);
+
   --space-1: 3px;
   --space-2: 7px;
   --space-3: 11px;
@@ -36,16 +66,20 @@
   --space-6: 25px;
   --space-7: 33px;
   --space-8: 49px;
+
   --font-xs: 11px;
   --font-sm: 13px;
   --font-md: 15px;
   --font-lg: 19px;
   --font-xl: 25px;
   --font-display: 35px;
+
   --radius-sm: 7px;
   --radius-md: 13px;
   --radius-lg: 21px;
+
   --stroke: 1px;
+  --stroke-strong: 3px;
   --focus: 3px;
   --control-height: 39px;
   --sidebar-width: 231px;
@@ -57,6 +91,7 @@
   --titlebar-height: 47px;
   --window-button-width: 47px;
   --traffic-inset: 85px;
+
   --motion-fast: 175ms;
   --motion-normal: 235ms;
   --weight-medium: 550;
@@ -67,9 +102,11 @@
   --line-height: 1.65;
   color-scheme: light;
 }
+
 :root[data-theme="dark"],
 :host([data-theme="dark"]) {
   --palette-canvas: #211f1c;
+  --palette-sunken: #1b1916;
   --palette-panel: #292622;
   --palette-raised: #33302a;
   --palette-ink: #eee7db;
@@ -81,12 +118,15 @@
   --palette-good: #91c6a3;
   --palette-bad: #f09c91;
   --palette-warn: #dfbd7f;
+  --palette-info: #9aa6b2;
   color-scheme: dark;
 }
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]),
   :host(:not([data-theme="light"]):not([data-theme="dark"])) {
     --palette-canvas: #211f1c;
+    --palette-sunken: #1b1916;
     --palette-panel: #292622;
     --palette-raised: #33302a;
     --palette-ink: #eee7db;
@@ -98,6 +138,7 @@
     --palette-good: #91c6a3;
     --palette-bad: #f09c91;
     --palette-warn: #dfbd7f;
+    --palette-info: #9aa6b2;
     color-scheme: dark;
   }
 }

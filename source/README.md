@@ -1,10 +1,12 @@
-# 轻译 3.1
+# 轻译 3.2
 
 轻量 Chromium MV3 网页翻译扩展。入口为网页右键菜单和设置页，网页仅显示可关闭的小进度条。暖米白、炭黑、陶土橙配色，支持浅色、深色和跟随系统。设置分为翻译服务、阅读与网站、本地缓存、词库与修订、诊断、更新与迁移，分区保存并保留未保存草稿。
 
 [当前 Release](https://github.com/shusfun/Qingyi/releases/latest) · [本地模型指南](https://github.com/shusfun/Qingyi/blob/main/docs/local-model.md) · [mistral-gui 管理器](https://github.com/shusfun/mistral-gui)
 
 更新仓库默认使用 `shusfun/Qingyi`；旧设置缺失或留空时恢复官方源，自定义仓库可在更新页高级设置中单独保存。只加载固定的 `extension` 目录，后续构建直接更新该目录，不需要加载多个副本。
+
+3.2 新增划词与区域翻译、站点规则、目标语言、DeepL、每日用量上限、内置 PDF 阅读，以及可选的词库和修订单向同步。设置页改用本地打包的 Preact 界面；旧设置、词库和 OPFS 缓存继续沿用。同步超过 20,000 条修订或单词库 50,000 条时会明确拒绝，避免只同步一部分却显示成功。
 
 ## 安装和构建
 

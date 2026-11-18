@@ -43,8 +43,10 @@ const operations = new Set([
   "revision",
   "revisionHistory",
   "readRevision",
+  "exportSyncData",
   "configurePack",
   "clearModels",
+  "purgeInvalidModels",
   "deletePack",
   "clearRevisions",
   "collect",
@@ -74,10 +76,12 @@ onmessage = (event: MessageEvent) => {
           postMessage({ id, ok: true, data: { stopped: true } });
           return;
         }
-        const callArgs = [...args];
-        if (
+        let callArgs = [...args];
+        if (operation === "lookup") {
+          // Ensure trace is arg[1] and optional dictionaryOnly is arg[2]
+          callArgs = [args[0], t, Boolean(args[1])];
+        } else if (
           [
-            "lookup",
             "lookupModels",
             "enqueue",
             "startPack",
@@ -88,12 +92,14 @@ onmessage = (event: MessageEvent) => {
             "revision",
             "configurePack",
             "clearModels",
+            "purgeInvalidModels",
             "deletePack",
             "clearRevisions",
             "collect",
           ].includes(operation)
-        )
+        ) {
           callArgs.push(t);
+        }
         const result = await (db as any)[operation](...callArgs);
         record(t, "worker.end", {
           outcome: "success",

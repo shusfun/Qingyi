@@ -81,8 +81,14 @@ export class IndexedTraceSink implements TraceSink {
       tx.onerror = tx.onabort = () => reject(tx.error);
     });
   }
-  async read(traceId?: string, batchId?: string, limit?: number) {
+  async read(
+    traceId?: string,
+    batchId?: string,
+    limit?: number,
+    offset = 0,
+  ): Promise<TraceEvent[]> {
     const db = await this.open();
+    const skipTarget = Math.max(0, Math.floor(offset) || 0);
     return new Promise<TraceEvent[]>((resolve, reject) => {
       const tx = db.transaction("events", "readonly"),
         s = tx.objectStore("events"),
@@ -90,12 +96,20 @@ export class IndexedTraceSink implements TraceSink {
           ? s.index("traceId").openCursor(IDBKeyRange.only(traceId), "prev")
           : s.openCursor(null, "prev"),
         out: TraceEvent[] = [];
+      let skipped = 0;
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
         const event = cursor.value.event;
-        if (!batchId || event.batchId === batchId) out.push(event);
-        if (limit !== undefined && out.length >= limit) return;
+        if (!batchId || event.batchId === batchId) {
+          if (skipped < skipTarget) {
+            skipped++;
+            cursor.continue();
+            return;
+          }
+          out.push(event);
+          if (limit !== undefined && out.length >= limit) return;
+        }
         cursor.continue();
       };
       tx.oncomplete = () => resolve(out.reverse());

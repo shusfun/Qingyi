@@ -1,0 +1,12 @@
+.pdf-columns {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  overflow-wrap: anywhere;
+}
+.pdf-columns > div {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  .pdf-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

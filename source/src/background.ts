@@ -3,6 +3,7 @@ import {
   DEFAULTS,
   OLD_ID,
   configFrom,
+  normalizeLang,
   publicConfig,
   requireValue,
   sha256,
@@ -11,22 +12,100 @@ import {
   type Trace,
 } from "./types";
 import { newTrace, childTrace, validTrace, sanitizeTrace } from "./trace";
-import { storage, record } from "./storage-client";
+import { storage, record, recordBatch } from "./storage-client";
 import { fetchRelease } from "./releases";
-import { translateRouted, localModels } from "./local-provider";
+import {
+  translateRouted,
+  localModels,
+  invalidateLocalStatusCache,
+} from "./local-provider";
+import {
+  setActiveTabs,
+  cancelQueuedForTab,
+  type SchedulePriority,
+} from "./network";
+import { readUsageStore, clearUsageStore } from "./usage";
+import {
+  syncDictionaryToManager,
+  clearSyncedDictionaryInManager,
+} from "./sync-client";
+
 const ready = chrome.storage.local.setAccessLevel({
   accessLevel: "TRUSTED_CONTEXTS",
 });
+
 const own = (s: chrome.runtime.MessageSender) =>
   s.id === chrome.runtime.id && !!s.url?.startsWith(chrome.runtime.getURL(""));
+
 const origin = (s: chrome.runtime.MessageSender) => {
   try {
     const u = new URL(s.url || s.tab?.url || "");
-    return /^https?:$/.test(u.protocol) ? u.origin : "";
+    if (/^https?:$/.test(u.protocol)) return u.origin;
+    if (u.protocol === "file:") return "file://";
+    if (u.protocol === "chrome-extension:") return u.origin;
+    return "";
   } catch {
     return "";
   }
 };
+
+// Track active foreground tabs per browser window for priority scheduling (Q-00).
+const windowActiveTab = new Map<number, number>();
+async function refreshActiveTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true });
+    windowActiveTab.clear();
+    for (const tab of tabs) {
+      if (tab.windowId !== undefined && tab.id !== undefined) {
+        windowActiveTab.set(tab.windowId, tab.id);
+      }
+    }
+    setActiveTabs(windowActiveTab.values());
+  } catch {
+    // ignore startup query race
+  }
+}
+void refreshActiveTabs();
+
+function isTabActive(tabId: number): boolean {
+  if (!windowActiveTab.size) return true;
+  for (const activeId of windowActiveTab.values()) {
+    if (activeId === tabId) return true;
+  }
+  return false;
+}
+
+export interface SiteRule {
+  mode?: "auto" | "never" | "default";
+  display?: "chinese" | "bilingual";
+  routing?: "local-first" | "local-only" | "cloud-only";
+  model?: string;
+  sourceLang?: string;
+  targetLang?: string;
+  skipSelector?: string;
+  articleOnly?: boolean;
+}
+
+function normalizeSiteRules(
+  rawSites: unknown,
+  rawRules: unknown,
+): Record<string, SiteRule> {
+  const merged: Record<string, SiteRule> = {};
+  if (rawSites && typeof rawSites === "object") {
+    for (const [k, v] of Object.entries(rawSites as Record<string, unknown>)) {
+      if (v === true) merged[k] = { mode: "auto" };
+    }
+  }
+  if (rawRules && typeof rawRules === "object") {
+    for (const [k, v] of Object.entries(rawRules as Record<string, any>)) {
+      if (v && typeof v === "object") {
+        merged[k] = { ...merged[k], ...v };
+      }
+    }
+  }
+  return merged;
+}
+
 async function config() {
   await ready;
   return configFrom(
@@ -34,8 +113,35 @@ async function config() {
     DEFAULTS,
   );
 }
+
+async function effectiveConfigForDomain(
+  base: Config,
+  domain: string,
+): Promise<{
+  config: Config;
+  rule?: SiteRule;
+}> {
+  const d = await chrome.storage.local.get(["sites", "site.rules"]);
+  const rules = normalizeSiteRules(d.sites, d["site.rules"]);
+  const rule = rules[domain];
+  if (!rule) return { config: base };
+  return {
+    config: {
+      ...base,
+      ...(rule.display ? { mode: rule.display } : {}),
+      ...(rule.routing ? { routing: rule.routing } : {}),
+      ...(rule.model?.trim() ? { model: rule.model.trim() } : {}),
+      ...(rule.targetLang
+        ? { targetLang: normalizeLang(rule.targetLang) }
+        : {}),
+    },
+    rule,
+  };
+}
+
 async function context(m: any, s: chrome.runtime.MessageSender) {
-  requireValue(origin(s) && s.tab?.id !== undefined, "WEB_PAGE_REQUIRED");
+  const dom = origin(s);
+  requireValue((dom && s.tab?.id !== undefined) || own(s), "WEB_PAGE_REQUIRED");
   requireValue(validTrace(m.trace), "INVALID_TRACE");
   requireValue(
     Array.isArray(m.sources) &&
@@ -48,54 +154,61 @@ async function context(m: any, s: chrome.runtime.MessageSender) {
       m.sources.join("").length <= 26000,
     "BATCH_LIMIT",
   );
-  const c = await config(),
-    domain = origin(s),
-    scope = await sha256(
-      JSON.stringify([
-        "dictionary-first",
-        c.routing,
-        c.localUrl,
-        c.localModel,
-        c.localBackend,
-        c.localAutoStart,
-        c.apiUrl,
-        c.model,
-      ]),
-    );
+  const baseConfig = await config();
+  const domain = m.domain || dom || "https://qingyi.local";
+  const { config: c, rule } = await effectiveConfigForDomain(
+    baseConfig,
+    domain,
+  );
+  const sourceLang = normalizeLang(
+    rule?.sourceLang ||
+      (/^[a-z_-]{1,20}$/i.test(m.sourceLang || "") ? m.sourceLang : "auto"),
+  );
+  const targetLang = normalizeLang(m.targetLang || c.targetLang || "zh-CN");
   return {
-    c,
+    c: { ...c, targetLang },
     inputs: (m.sources as string[]).map(
       (source): CacheInput => ({
         source,
         domain,
-        scope,
-        sourceLang: /^[a-z-]{1,20}$/i.test(m.sourceLang || "")
-          ? m.sourceLang
-          : "auto",
-        targetLang: "zh-CN",
+        scope: "",
+        sourceLang,
+        targetLang,
       }),
     ),
     t: m.trace as Trace,
   };
 }
+
 type Shared = {
   owner: Trace;
-  promise: Promise<string>;
-  resolve: (v: string) => void;
+  promise: Promise<{
+    translation: string;
+    channel: "local" | "cloud" | "cache";
+  }>;
+  resolve: (v: {
+    translation: string;
+    channel: "local" | "cloud" | "cache";
+  }) => void;
   reject: (e: Error) => void;
   consumers: Set<string>;
   controller: AbortController;
 };
+
 const inflight = new Map<string, Shared>();
+const activeUiOps = new Map<string, AbortController>();
+
+// Dictionary + revision + legacy lookup without dead duplicate model-table query (Q-T22, Q-T23).
 async function lookup(inputs: CacheInput[], c: Config, t: Trace) {
-  const result = await storage("lookup", [inputs], t);
+  const result = await storage("lookup", [inputs, true], t);
   const missing = inputs
     .map((input, i) =>
       !result.translations[i] && !input.source.includes("__QY") ? i : -1,
     )
     .filter((i) => i >= 0);
   if (!missing.length) return result;
-  if (c.routing !== "cloud-only") return result;
+
+  // Read migrated legacy v2 caches in all routing modes (Q-T23).
   const data = await chrome.storage.local.get("migration.legacy");
   const buckets = data["migration.legacy"] || {};
   const key =
@@ -125,6 +238,7 @@ async function lookup(inputs: CacheInput[], c: Config, t: Trace) {
   });
   return result;
 }
+
 const jobs = new Map<
   string,
   {
@@ -136,7 +250,9 @@ const jobs = new Map<
     trace: Trace;
   }
 >();
-function cancel(tab: number, session?: string) {
+
+function cancel(tab: number, session?: string, reason = "page-or-user-cancel") {
+  if (!session) cancelQueuedForTab(tab);
   for (const [id, job] of jobs)
     if (job.tab === tab && (!session || job.session === session)) {
       job.controller.abort();
@@ -151,27 +267,59 @@ function cancel(tab: number, session?: string) {
       }
       record(job.trace, "operation.cancel", {
         outcome: "cancelled",
-        reason: "page-or-user-cancel",
+        reason,
       });
     }
 }
+
 async function translate(m: any, s: chrome.runtime.MessageSender) {
   const { c, inputs, t } = await context(m, s);
+  const tabId = s.tab?.id ?? 0;
+  const requestedPrio: SchedulePriority =
+    m.priority === 0 || m.priority === 1 || m.priority === 2 || m.priority === 3
+      ? m.priority
+      : 2;
+  const effectivePrio: SchedulePriority =
+    requestedPrio === 0 ? 0 : tabId && !isTabActive(tabId) ? 3 : requestedPrio;
+
   record(t, "batch.translate.start", {
     outcome: "started",
     items: inputs.length,
   });
-  const cached = await lookup(inputs, c, t);
-  const values: (string | null)[] = cached.translations;
+
+  // Skip dictionary lookup when content.ts already ran LOOKUP for this batch (Q-T22).
+  const cached = m.skipLookup
+    ? {
+        translations: new Array(inputs.length).fill(null),
+        sources: new Array(inputs.length).fill("miss"),
+        hits: 0,
+      }
+    : await lookup(inputs, c, t);
+  const values: (string | null)[] = [...cached.translations];
+  const channels: ("local" | "cloud" | "cache")[] = values.map(() => "cache");
+  const itemErrors: (string | undefined)[] = new Array(inputs.length);
   const missing = inputs
     .map((_, i) => (values[i] === null ? i : -1))
     .filter((i) => i >= 0);
-  if (!missing.length)
-    return { translations: values, hits: cached.hits, requests: 0, trace: t };
+  if (!missing.length) {
+    record(childTrace(t), "batch.complete", {
+      outcome: "success",
+      items: inputs.length,
+      hits: cached.hits,
+    });
+    return {
+      translations: values,
+      channels,
+      hits: cached.hits,
+      requests: 0,
+      trace: t,
+    };
+  }
+
   const id = crypto.randomUUID(),
     controller = new AbortController(),
     job = {
-      tab: s.tab!.id!,
+      tab: tabId,
       frame: s.frameId || 0,
       session: t.sessionId || "",
       controller,
@@ -179,18 +327,37 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
       trace: t,
     };
   jobs.set(id, job);
+  if (own(s) && typeof m.opId === "string") activeUiOps.set(m.opId, controller);
   const fresh: { key: string; index: number; shared: Shared }[] = [];
   let requests = 0;
   let providerHits = 0;
   let cacheWarning = false;
+
   const promises = await Promise.all(
     missing.map(async (index) => {
       const input = inputs[index],
-        key = await sha256(JSON.stringify(input));
+        key = await sha256(
+          JSON.stringify([
+            input,
+            c.routing,
+            c.apiUrl,
+            c.model,
+            c.localUrl,
+            c.localModel,
+            c.serviceType || "chat",
+          ]),
+        );
       let item = inflight.get(key);
       if (!item) {
-        let resolve!: (v: string) => void, reject!: (e: Error) => void;
-        const promise = new Promise<string>((r, j) => {
+        let resolve!: (v: {
+            translation: string;
+            channel: "local" | "cloud" | "cache";
+          }) => void,
+          reject!: (e: Error) => void;
+        const promise = new Promise<{
+          translation: string;
+          channel: "local" | "cloud" | "cache";
+        }>((r, j) => {
           resolve = r;
           reject = j;
         });
@@ -205,18 +372,20 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
         };
         inflight.set(key, item);
         fresh.push({ key, index, shared: item });
-      } else
+      } else {
         record(childTrace(t), "queue.coalesced", {
           outcome: "success",
           items: 1,
           resourceId: item.owner.traceId,
           source: "producer-trace",
         });
+      }
       item.consumers.add(id);
       job.shared.push(item);
       return { index, promise: item.promise };
     }),
   );
+
   if (controller.signal.aborted) {
     for (const item of job.shared) item.consumers.delete(id);
     for (const item of fresh) {
@@ -226,18 +395,21 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
     jobs.delete(id);
     throw Error("CANCELLED");
   }
+
   if (fresh.length) {
     const groupController = new AbortController();
     for (const entry of fresh) {
       entry.shared.controller = groupController;
     }
-    void chrome.tabs
-      .sendMessage(
-        s.tab!.id!,
-        { type: "PROGRESS", traceId: t.traceId, state: "queue" },
-        { frameId: s.frameId || 0 },
-      )
-      .catch(() => {});
+    if (tabId) {
+      void chrome.tabs
+        .sendMessage(
+          tabId,
+          { type: "PROGRESS", traceId: t.traceId, state: "queue" },
+          { frameId: s.frameId || 0 },
+        )
+        .catch(() => {});
+    }
     void (async () => {
       const routed = await translateRouted(
         c,
@@ -246,45 +418,70 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
         groupController.signal,
         (phase = "request") => {
           if (phase === "request") requests++;
-          void chrome.tabs
-            .sendMessage(
-              s.tab!.id!,
-              {
-                type: "PROGRESS",
-                traceId: t.traceId,
-                batchId: t.batchId,
-                requests,
-                state: phase,
-              },
-              { frameId: s.frameId || 0 },
-            )
-            .catch(() => {});
+          if (tabId) {
+            void chrome.tabs
+              .sendMessage(
+                tabId,
+                {
+                  type: "PROGRESS",
+                  traceId: t.traceId,
+                  batchId: t.batchId,
+                  requests,
+                  state: phase,
+                },
+                { frameId: s.frameId || 0 },
+              )
+              .catch(() => {});
+          }
+        },
+        {
+          priority: effectivePrio,
+          tabId: tabId || undefined,
+          allowPartial: true,
+          persistImmediately: false,
         },
       );
-      const buffered = await storage("enqueue", [routed.entries], t).catch(
-        () => {
-          cacheWarning = true;
-          record(childTrace(t), "cache.buffer", {
-            outcome: "failed",
-            reason: "CACHE_WRITE_PAUSED",
-          });
-        },
-      );
-      if (buffered?.writeError) cacheWarning = true;
+      if (routed.entries.length) {
+        const buffered = await storage("enqueue", [routed.entries], t).catch(
+          () => {
+            cacheWarning = true;
+            record(childTrace(t), "cache.buffer", {
+              outcome: "failed",
+              reason: "CACHE_WRITE_PAUSED",
+            });
+          },
+        );
+        if (buffered?.writeError) cacheWarning = true;
+      }
       providerHits += routed.hits;
-      fresh.forEach((v, i) => v.shared.resolve(routed.translations[i]));
+      fresh.forEach((v, i) => {
+        const translated = routed.translations[i];
+        if (translated !== null && translated !== undefined) {
+          v.shared.resolve({
+            translation: translated,
+            channel: routed.channels[i] || "cloud",
+          });
+        } else {
+          v.shared.reject(
+            new Error(routed.errors?.[i] || "TRANSLATION_FAILED"),
+          );
+        }
+      });
     })()
       .catch((error) => fresh.forEach((v) => v.shared.reject(error)))
       .finally(() => fresh.forEach((v) => inflight.delete(v.key)));
   }
+
   try {
-    await Promise.race([
-      Promise.all(
+    const settled = await Promise.race([
+      Promise.allSettled(
         promises.map(async (p) => {
-          values[p.index] = await p.promise;
+          const out = await p.promise;
+          values[p.index] = out.translation;
+          channels[p.index] = out.channel;
         }),
       ),
-      new Promise((_, reject) =>
+      new Promise<never>((_, reject) =>
         controller.signal.addEventListener(
           "abort",
           () => reject(Error("CANCELLED")),
@@ -293,13 +490,34 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
       ),
     ]);
     requireValue(!controller.signal.aborted, "CANCELLED");
+
+    settled.forEach((res, idx) => {
+      if (res.status === "rejected") {
+        const origIndex = promises[idx].index;
+        itemErrors[origIndex] =
+          res.reason instanceof Error
+            ? res.reason.message
+            : String(res.reason || "TRANSLATION_FAILED");
+      }
+    });
+
+    const anySuccess = values.some((v) => v !== null);
+    if (!anySuccess) {
+      const firstErr = itemErrors.find(Boolean) || "TRANSLATION_FAILED";
+      throw new Error(firstErr);
+    }
+
+    const failedCount = values.filter((v) => v === null).length;
     record(childTrace(t), "batch.complete", {
-      outcome: "success",
+      outcome: failedCount ? "fallback" : "success",
       items: inputs.length,
       hits: cached.hits + providerHits,
+      ...(failedCount ? { reason: "PARTIAL_BATCH_SUCCESS" } : {}),
     });
     return {
       translations: values,
+      errors: itemErrors,
+      channels,
       hits: cached.hits + providerHits,
       requests,
       cacheWarning,
@@ -307,16 +525,22 @@ async function translate(m: any, s: chrome.runtime.MessageSender) {
     };
   } finally {
     jobs.delete(id);
+    if (own(s) && typeof m.opId === "string") activeUiOps.delete(m.opId);
     for (const item of job.shared) item.consumers.delete(id);
   }
 }
+
 let settingTail = Promise.resolve();
-async function registerSite(url: string, enabled: boolean) {
+async function registerSite(url: string, mode: "auto" | "never" | "default") {
   const id = "qingyi-" + (await sha256(url)).slice(0, 20);
   await chrome.scripting
     .unregisterContentScripts({ ids: [id, id + "-shadow"] })
     .catch(() => {});
-  if (enabled && (await chrome.permissions.contains({ origins: [url + "/*"] })))
+  // "never" sites never get scripts registered or injected (Prompt item 13).
+  if (
+    mode === "auto" &&
+    (await chrome.permissions.contains({ origins: [url + "/*"] }))
+  ) {
     await chrome.scripting.registerContentScripts([
       {
         id: id + "-shadow",
@@ -336,20 +560,29 @@ async function registerSite(url: string, enabled: boolean) {
         persistAcrossSessions: true,
       },
     ]);
+  }
 }
+
 async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
   await ready;
   requireValue(s.id === chrome.runtime.id, "INVALID_SENDER");
   const trusted = own(s);
   switch (m.type) {
     case "PUBLIC": {
-      const c = await config(),
+      const base = await config(),
+        dom = m.domain || origin(s),
         data = await chrome.storage.local.get([
           "sites",
+          "site.rules",
           "ui.progressVisible",
           "ui.theme",
           "ui.position",
+          "ui.locale",
+          "ui.translationStyle",
         ]);
+      const rules = normalizeSiteRules(data.sites, data["site.rules"]);
+      const siteRule = rules[dom];
+      const { config: c } = await effectiveConfigForDomain(base, dom);
       return {
         ...publicConfig(c),
         revision: await sha256(
@@ -361,33 +594,85 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
             c.localModel,
             c.localBackend,
             c.localAutoStart,
+            c.targetLang || "zh-CN",
+            c.serviceType || "chat",
           ]),
         ),
-        auto: !!data.sites?.[origin(s)],
+        auto: siteRule?.mode === "auto",
+        never: siteRule?.mode === "never",
+        siteRule: siteRule || null,
         progressVisible: data["ui.progressVisible"] !== false,
         theme: data["ui.theme"] || "system",
         position: data["ui.position"],
+        locale: data["ui.locale"] || "",
+        translationStyle: data["ui.translationStyle"] || null,
       };
     }
     case "TRACE":
       requireValue(validTrace(m.trace), "INVALID_TRACE");
       record(m.trace, m.event, { ...sanitizeTrace(m.fields || {}) });
       return {};
+    case "TRACE_BATCH": {
+      if (Array.isArray(m.events) && m.events.length <= 256) {
+        const cleaned = m.events
+          .filter(
+            (item: any) =>
+              validTrace(item?.trace) && typeof item?.event === "string",
+          )
+          .map((item: any) => ({
+            trace: item.trace as Trace,
+            event: String(item.event).slice(0, 80),
+            fields: sanitizeTrace(item.fields || {}),
+          }));
+        recordBatch(cleaned);
+      }
+      return {};
+    }
     case "LOOKUP": {
       const { inputs, c, t } = await context(m, s);
       return lookup(inputs, c, t);
     }
     case "TRANSLATE":
       return translate(m, s);
+    case "SAVE_REVISION": {
+      // Allows in-page selection popover & inline revision editor to save user revisions directly (Prompt items 7 & 13).
+      const dom = origin(s);
+      requireValue(
+        (dom && s.tab?.id !== undefined) || trusted,
+        "WEB_PAGE_REQUIRED",
+      );
+      const t = validTrace(m.trace) ? m.trace : newTrace();
+      const base = await config();
+      const entry = {
+        source: String(m.source || ""),
+        translation: String(m.translation || ""),
+        domain: String(m.domain ?? dom ?? "*"),
+        sourceLang: normalizeLang(m.sourceLang || "auto"),
+        targetLang: normalizeLang(m.targetLang || base.targetLang || "zh-CN"),
+        scope: "",
+      };
+      const saved = await storage("revision", [entry], t);
+      if (base.syncDictionary) {
+        void syncDictionaryToManager(base, t).catch(() => {});
+      }
+      return saved;
+    }
     case "CANCEL":
       if (s.tab?.id !== undefined) cancel(s.tab.id, m.session);
+      return {};
+    case "TAB_VISIBILITY":
+      if (s.tab?.id !== undefined && m.hidden) {
+        cancelQueuedForTab(s.tab.id);
+      }
       return {};
     case "OPEN_SETTINGS": {
       const t = validTrace(m.trace) ? childTrace(m.trace) : newTrace();
       record(t, "settings.open.start", { outcome: "started" });
       try {
+        const hash =
+          typeof m.section === "string" && m.section ? "#" + m.section : "";
         await chrome.tabs.create({
-          url: chrome.runtime.getURL("options.html"),
+          url: chrome.runtime.getURL("options.html") + hash,
           ...(s.tab?.windowId !== undefined
             ? { windowId: s.tab.windowId }
             : {}),
@@ -415,9 +700,38 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
       );
       return chrome.storage.local.set({ "ui.position": { x: m.x, y: m.y } });
   }
+
   requireValue(trusted, "OPTIONS_PAGE_REQUIRED");
+  if (m.type === "CANCEL_OP") {
+    if (typeof m.opId === "string") {
+      activeUiOps.get(m.opId)?.abort();
+      activeUiOps.delete(m.opId);
+    }
+    return { cancelled: true };
+  }
+
+  // Avoid polluting trace pagination when reading diagnostics (Q-02).
+  if (m.type === "TRACE_READ") {
+    const t = validTrace(m.trace) ? m.trace : newTrace();
+    return storage(
+      "trace.read",
+      [
+        m.traceId,
+        m.batchId,
+        m.limit === undefined
+          ? undefined
+          : Math.max(1, Math.min(200, Number(m.limit) || 200)),
+        Math.max(0, Number(m.offset) || 0),
+      ],
+      t,
+    );
+  }
+
   const t = validTrace(m.trace) ? m.trace : newTrace();
   record(t, "operation.start", { outcome: "started", resourceId: m.type });
+  const uiController = new AbortController();
+  if (typeof m.opId === "string") activeUiOps.set(m.opId, uiController);
+
   try {
     let result;
     switch (m.type) {
@@ -427,29 +741,38 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         result = await localModels(c, m.trace);
         break;
       }
-      case "PRIVATE":
+      case "PRIVATE": {
+        const stored = await chrome.storage.local.get([
+          "sites",
+          "site.rules",
+          "ui.progressVisible",
+          "ui.theme",
+          "ui.locale",
+          "ui.translationStyle",
+          "migration.result",
+          "sync.status",
+        ]);
         result = {
           ...publicConfig(await config()),
-          ...(await chrome.storage.local.get([
-            "sites",
-            "ui.progressVisible",
-            "ui.theme",
-            "migration.result",
-          ])),
+          ...stored,
+          siteRules: normalizeSiteRules(stored.sites, stored["site.rules"]),
         };
         break;
+      }
       case "SAVE": {
         const run = settingTail
           .catch(() => {})
           .then(async () => {
-            const c = configFrom(m.config, await config());
+            const prev = await config();
+            const c = configFrom(m.config, prev);
             await chrome.storage.local.set({ [CONFIG_KEY]: c });
             const loaded = await config();
             requireValue(
               JSON.stringify(loaded) === JSON.stringify(c),
               "CONFIG_VERIFY_FAILED",
             );
-            const affectsTranslation = [
+            invalidateLocalStatusCache();
+            const translationKeys: (keyof Config)[] = [
               "apiUrl",
               "apiKey",
               "model",
@@ -463,9 +786,29 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
               "timeoutMs",
               "concurrency",
               "batch",
-            ].some((key) => key in m.config);
-            if (affectsTranslation)
-              for (const job of jobs.values()) cancel(job.tab);
+              "targetLang",
+              "serviceType",
+              "deeplUrl",
+              "deeplKey",
+            ];
+            const changedTranslation = translationKeys.some(
+              (key) => key in m.config && prev[key] !== loaded[key],
+            );
+            if (changedTranslation) {
+              const affectedTabs = new Set<number>();
+              for (const job of jobs.values()) {
+                affectedTabs.add(job.tab);
+                cancel(job.tab, undefined, "config-updated");
+              }
+              for (const tabId of affectedTabs) {
+                void chrome.tabs
+                  .sendMessage(tabId, {
+                    type: "CONTROL",
+                    command: "config-updated",
+                  })
+                  .catch(() => {});
+              }
+            }
             await storage("setBudget", [c.budgetBytes], t);
             return publicConfig(loaded);
           });
@@ -477,21 +820,27 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         const c = configFrom(m.config, await config());
         const batch = childTrace(t, { batchId: crypto.randomUUID() });
         record(batch, "batch.start", { outcome: "started", items: 1 });
-        result = await translateRouted(
+        const routed = await translateRouted(
           c,
           [
             {
               source: "Hello.",
               scope: "",
               domain: "https://qingyi.test",
-              sourceLang: "auto",
-              targetLang: "zh-CN",
+              sourceLang: "en",
+              targetLang: c.targetLang || "zh-CN",
             },
           ],
           batch,
-          new AbortController().signal,
+          uiController.signal,
           () => {},
-        ).then(() => ({ connected: true }));
+        );
+        result = {
+          connected: true,
+          channel: routed.channels[0],
+          translation: routed.translations[0],
+          localFallbackReason: routed.localFallbackReason,
+        };
         break;
       }
       case "PREFERENCES": {
@@ -500,10 +849,16 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
             typeof m.visible === "boolean",
           "INVALID_PREFERENCES",
         );
-        await chrome.storage.local.set({
+        const updates: Record<string, unknown> = {
           "ui.theme": m.theme,
           "ui.progressVisible": m.visible,
-        });
+        };
+        if (typeof m.locale === "string") updates["ui.locale"] = m.locale;
+        if (m.translationStyle && typeof m.translationStyle === "object") {
+          updates["ui.translationStyle"] = m.translationStyle;
+        }
+        await chrome.storage.local.set(updates);
+        if (typeof m.locale === "string") void menus();
         result = { saved: true };
         break;
       }
@@ -511,15 +866,48 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         await chrome.storage.local.set({ "ui.progressVisible": !!m.visible });
         result = { saved: true };
         break;
-      case "REMOVE_SITE": {
-        const data = await chrome.storage.local.get("sites"),
-          sites = { ...data.sites };
-        delete sites[m.origin];
-        await chrome.storage.local.set({ sites });
-        await registerSite(m.origin, false);
-        result = { sites };
+      case "SAVE_SITE_RULE": {
+        const siteOrigin = String(m.origin || "").trim();
+        requireValue(
+          siteOrigin.length > 0 && siteOrigin.length <= 200,
+          "INVALID_CONFIG",
+        );
+        const rule: SiteRule = m.rule || {};
+        const stored = await chrome.storage.local.get(["sites", "site.rules"]);
+        const sites = { ...(stored.sites || {}) };
+        const rules = normalizeSiteRules(stored.sites, stored["site.rules"]);
+        if (!m.rule || Object.keys(rule).length === 0) {
+          delete sites[siteOrigin];
+          delete rules[siteOrigin];
+          await registerSite(siteOrigin, "default");
+        } else {
+          rules[siteOrigin] = rule;
+          if (rule.mode === "auto") sites[siteOrigin] = true;
+          else delete sites[siteOrigin];
+          await registerSite(siteOrigin, rule.mode || "default");
+        }
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        result = { sites, siteRules: rules };
         break;
       }
+      case "REMOVE_SITE": {
+        const stored = await chrome.storage.local.get(["sites", "site.rules"]),
+          sites = { ...stored.sites },
+          rules = normalizeSiteRules(stored.sites, stored["site.rules"]);
+        delete sites[m.origin];
+        delete rules[m.origin];
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        await registerSite(m.origin, "default");
+        result = { sites, siteRules: rules };
+        break;
+      }
+      case "USAGE_READ":
+        result = await readUsageStore();
+        break;
+      case "USAGE_CLEAR":
+        await clearUsageStore();
+        result = { cleared: true };
+        break;
       case "DATABASE": {
         const allowed = new Set([
           "status",
@@ -532,8 +920,10 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
           "revision",
           "revisionHistory",
           "readRevision",
+          "exportSyncData",
           "configurePack",
           "clearModels",
+          "purgeInvalidModels",
           "deletePack",
           "clearRevisions",
           "collect",
@@ -542,31 +932,34 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
         ]);
         requireValue(allowed.has(m.operation), "INVALID_OPERATION");
         result = await storage(m.operation, m.args || [], t);
+        if (
+          [
+            "revision",
+            "activatePack",
+            "configurePack",
+            "deletePack",
+            "rollback",
+            "clearRevisions",
+          ].includes(m.operation)
+        ) {
+          const cur = await config();
+          if (cur.syncDictionary) {
+            void syncDictionaryToManager(cur, t).catch(() => {});
+          }
+        }
         break;
       }
-      case "TRACE_READ":
-        result = await storage(
-          "trace.read",
-          [
-            m.traceId,
-            m.batchId,
-            m.limit === undefined
-              ? undefined
-              : Math.max(1, Math.min(200, Number(m.limit) || 200)),
-            Math.max(0, Number(m.offset) || 0),
-          ],
-          t,
-        ).then(async (r) => {
-          if (m.traceId || m.batchId) {
-            r.events = r.events.filter(
-              (e: any) =>
-                (!m.traceId || e.traceId === m.traceId) &&
-                (!m.batchId || e.batchId === m.batchId),
-            );
-          }
-          return r;
-        });
+      case "SYNC_NOW": {
+        const c = await config();
+        result = await syncDictionaryToManager(c, t, uiController.signal);
         break;
+      }
+      case "SYNC_CLEAR": {
+        const c = await config();
+        await clearSyncedDictionaryInManager(c, t, uiController.signal);
+        result = { cleared: true };
+        break;
+      }
       case "TRACE_CLEAR":
         result = await storage("trace.clear", [], t);
         break;
@@ -588,7 +981,7 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
     return result;
   } catch (e) {
     record(t, "operation.end", {
-      outcome: "failed",
+      outcome: uiController.signal.aborted ? "cancelled" : "failed",
       resourceId: m.type,
       reason:
         e instanceof Error && /^[A-Z0-9_]+$/.test(e.message)
@@ -596,8 +989,11 @@ async function handle(m: any, s: chrome.runtime.MessageSender): Promise<any> {
           : "OPERATION_FAILED",
     });
     throw e;
+  } finally {
+    if (typeof m.opId === "string") activeUiOps.delete(m.opId);
   }
 }
+
 chrome.runtime.onMessage.addListener((m, s, respond) => {
   if (m?.target) return;
   void handle(m, s).then(
@@ -606,28 +1002,90 @@ chrome.runtime.onMessage.addListener((m, s, respond) => {
   );
   return true;
 });
-chrome.tabs.onRemoved.addListener((id) => cancel(id));
+
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  const previousTabId = windowActiveTab.get(windowId);
+  windowActiveTab.set(windowId, tabId);
+  setActiveTabs(windowActiveTab.values());
+  if (previousTabId !== undefined && previousTabId !== tabId) {
+    cancelQueuedForTab(previousTabId);
+    void chrome.tabs
+      .sendMessage(previousTabId, {
+        type: "CONTROL",
+        command: "tab-deactivated",
+      })
+      .catch(() => {});
+  }
+  void chrome.tabs
+    .sendMessage(tabId, { type: "CONTROL", command: "tab-activated" })
+    .catch(() => {});
+});
+
+chrome.windows?.onFocusChanged?.addListener(() => {
+  void refreshActiveTabs();
+});
+
+chrome.tabs.onRemoved.addListener((id) => {
+  for (const [winId, activeId] of windowActiveTab) {
+    if (activeId === id) windowActiveTab.delete(winId);
+  }
+  setActiveTabs(windowActiveTab.values());
+  cancel(id);
+});
+
 chrome.webNavigation?.onCommitted.addListener(({ tabId, frameId }) => {
   if (frameId === 0) cancel(tabId);
 });
+
 chrome.webNavigation.onHistoryStateUpdated.addListener(({ tabId, frameId }) => {
   void chrome.tabs
     .sendMessage(tabId, { type: "CONTROL", command: "route" }, { frameId })
     .catch(() => {});
 });
+
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "translate-page")
-    void chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .then(async ([tab]) => {
-        if (tab?.id) await activate(tab.id, "translate", (await config()).mode);
-      })
-      .catch(() => {});
+  void chrome.tabs
+    .query({ active: true, currentWindow: true })
+    .then(async ([tab]) => {
+      if (!tab?.id) return;
+      if (command === "translate-page") {
+        await activate(tab.id, "translate", (await config()).mode);
+      } else if (command === "toggle-mode") {
+        await activate(tab.id, "toggle-mode");
+      } else if (command === "restore-original") {
+        await activate(tab.id, "original");
+      } else if (command === "translate-selection") {
+        await activate(tab.id, "translate-selection");
+      }
+    })
+    .catch(() => {});
 });
+
 async function activate(tab: number, command: string, mode?: string) {
   const trace = newTrace();
   record(trace, "control.start", { outcome: "started", resourceId: command });
   try {
+    const tabInfo = await chrome.tabs.get(tab).catch(() => undefined);
+    if (tabInfo?.url?.startsWith("file:")) {
+      const allowed = await chrome.extension
+        ?.isAllowedFileSchemeAccess?.()
+        .catch(() => false);
+      if (!allowed) {
+        await chrome.tabs.create({
+          url: chrome.runtime.getURL("options.html#reading-file-access"),
+          active: true,
+        });
+        throw new Error("FILE_ACCESS_REQUIRED");
+      }
+    }
+    if (tabInfo?.url && /^https?:/.test(tabInfo.url)) {
+      const dom = new URL(tabInfo.url).origin;
+      const d = await chrome.storage.local.get(["sites", "site.rules"]);
+      const rules = normalizeSiteRules(d.sites, d["site.rules"]);
+      if (rules[dom]?.mode === "never" && command === "translate") {
+        return;
+      }
+    }
     await chrome.scripting.executeScript({
       target: { tabId: tab, frameIds: [0] },
       files: ["shadow-hook.js"],
@@ -669,72 +1127,244 @@ async function activate(tab: number, command: string, mode?: string) {
     record(trace, "control.end", {
       outcome: "failed",
       resourceId: command,
-      reason: "PAGE_CONTROL_FAILED",
+      reason:
+        e instanceof Error && /^[A-Z0-9_]+$/.test(e.message)
+          ? e.message
+          : "PAGE_CONTROL_FAILED",
     });
     throw e;
   }
 }
+
 async function menus() {
+  const version = chrome.runtime.getManifest().version;
+  const stored = await chrome.storage.local.get("ui.locale");
+  const en = String(
+    stored["ui.locale"] || chrome.i18n?.getUILanguage?.() || "",
+  ).startsWith("en");
+
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
     id: "qy",
-    title: "轻译 3.0",
+    title: en ? `Qingyi ${version}` : `轻译 ${version}`,
     contexts: ["page", "selection", "link"],
   });
-  for (const [id, title] of [
-    ["chinese", "翻译为中文"],
-    ["bilingual", "双语对照"],
-    ["original", "恢复原文"],
-    ["pause", "暂停翻译"],
-    ["progress", "显示本页进度"],
-    ["auto", "此网站自动翻译"],
-    ["settings", "设置"],
-  ])
+  // Selection translation first when text is selected (Prompt items 4 & 7)
+  chrome.contextMenus.create({
+    id: "translate-selection",
+    parentId: "qy",
+    title: en ? "Translate selected text" : "翻译选中文字",
+    contexts: ["selection"],
+  });
+  for (const [id, zhTitle, enTitle] of [
+    ["chinese", "译文模式", "Translated view"],
+    ["bilingual", "双语对照", "Bilingual view"],
+    ["original", "恢复原文", "Restore original"],
+    ["pause", "暂停翻译", "Pause translation"],
+  ] as const) {
     chrome.contextMenus.create({
       id,
       parentId: "qy",
-      title,
+      title: en ? enTitle : zhTitle,
       contexts: ["page", "selection", "link"],
     });
+  }
+  chrome.contextMenus.create({
+    id: "sep-tools",
+    parentId: "qy",
+    type: "separator",
+    contexts: ["page", "selection", "link"],
+  });
+  for (const [id, zhTitle, enTitle] of [
+    ["area-select", "框选区域翻译", "Translate selected area"],
+    ["edit-translation", "修正此译文", "Edit this translation"],
+    ["progress", "显示本页进度", "Show page progress"],
+  ] as const) {
+    chrome.contextMenus.create({
+      id,
+      parentId: "qy",
+      title: en ? enTitle : zhTitle,
+      contexts: ["page", "selection", "link"],
+    });
+  }
+  chrome.contextMenus.create({
+    id: "sep-site",
+    parentId: "qy",
+    type: "separator",
+    contexts: ["page", "selection", "link"],
+  });
+  chrome.contextMenus.create({
+    id: "auto",
+    parentId: "qy",
+    title: en ? "Auto-translate this site" : "此网站自动翻译",
+    contexts: ["page", "selection", "link"],
+  });
+  chrome.contextMenus.create({
+    id: "site-menu",
+    parentId: "qy",
+    title: en ? "This site…" : "本站规则…",
+    contexts: ["page", "selection", "link"],
+  });
+  for (const [id, zhTitle, enTitle] of [
+    ["site-never", "永不翻译此网站", "Never translate this site"],
+    ["site-article", "切换“只翻译正文”", "Toggle 'Main article only'"],
+    ["site-reset", "清除本站特殊规则", "Clear site rule"],
+  ] as const) {
+    chrome.contextMenus.create({
+      id,
+      parentId: "site-menu",
+      title: en ? enTitle : zhTitle,
+      contexts: ["page", "selection", "link"],
+    });
+  }
+  chrome.contextMenus.create({
+    id: "open-pdf",
+    parentId: "qy",
+    title: en ? "Open PDF in Qingyi" : "用轻译打开 PDF",
+    contexts: ["link", "page"],
+  });
+  chrome.contextMenus.create({
+    id: "settings",
+    parentId: "qy",
+    title: en ? "Settings" : "设置",
+    contexts: ["page", "selection", "link"],
+  });
 }
+
 chrome.runtime.onInstalled.addListener(() => {
   void menus();
 });
+
 chrome.runtime.onStartup.addListener(() => {
   void menus();
-  void chrome.storage.local
-    .get("sites")
-    .then((d) =>
-      Promise.all(Object.keys(d.sites || {}).map((o) => registerSite(o, true))),
+  void refreshActiveTabs();
+  void chrome.storage.local.get(["sites", "site.rules"]).then((d) => {
+    const rules = normalizeSiteRules(d.sites, d["site.rules"]);
+    return Promise.all(
+      Object.entries(rules).map(([o, r]) =>
+        registerSite(o, r.mode || "default"),
+      ),
     );
+  });
 });
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   void (async () => {
-    if (info.menuItemId === "settings")
-      return handle({ type: "OPEN_SETTINGS" }, { id: chrome.runtime.id, tab });
-    requireValue(
-      tab?.id !== undefined && !!tab.url?.match(/^https?:/),
-      "WEB_PAGE_REQUIRED",
-    );
     const action = String(info.menuItemId);
-    if (action === "auto") {
-      const o = new URL(tab.url!).origin;
-      requireValue(
-        await chrome.permissions.request({ origins: [o + "/*"] }),
-        "SITE_PERMISSION_REQUIRED",
-      );
-      const d = await chrome.storage.local.get("sites");
-      await chrome.storage.local.set({ sites: { ...d.sites, [o]: true } });
-      await registerSite(o, true);
-      return activate(tab.id!, "translate", (await config()).mode);
+    if (action === "settings") {
+      return handle({ type: "OPEN_SETTINGS" }, { id: chrome.runtime.id, tab });
     }
+    if (action === "open-pdf") {
+      const targetUrl = info.linkUrl || info.pageUrl || tab?.url || "";
+      if (targetUrl) {
+        await chrome.tabs.create({
+          url:
+            chrome.runtime.getURL("pdf.html") +
+            "?file=" +
+            encodeURIComponent(targetUrl),
+          active: true,
+        });
+      }
+      return;
+    }
+    requireValue(tab?.id !== undefined, "WEB_PAGE_REQUIRED");
+    const tabUrl = tab!.url || info.pageUrl || "";
+    if (tabUrl.startsWith("file:")) {
+      const allowed = await chrome.extension
+        ?.isAllowedFileSchemeAccess?.()
+        .catch(() => false);
+      if (!allowed) {
+        await chrome.tabs.create({
+          url: chrome.runtime.getURL("options.html#reading"),
+          active: true,
+        });
+        return;
+      }
+    } else {
+      requireValue(/^https?:/.test(tabUrl), "WEB_PAGE_REQUIRED");
+    }
+
+    if (
+      action === "auto" ||
+      action === "site-never" ||
+      action === "site-article" ||
+      action === "site-reset"
+    ) {
+      requireValue(/^https?:/.test(tabUrl), "WEB_PAGE_REQUIRED");
+      const o = new URL(tabUrl).origin;
+      const d = await chrome.storage.local.get(["sites", "site.rules"]);
+      const sites = { ...(d.sites || {}) };
+      const rules = normalizeSiteRules(d.sites, d["site.rules"]);
+      if (action === "auto") {
+        requireValue(
+          await chrome.permissions.request({ origins: [o + "/*"] }),
+          "SITE_PERMISSION_REQUIRED",
+        );
+        sites[o] = true;
+        rules[o] = { ...rules[o], mode: "auto" };
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        await registerSite(o, "auto");
+        return activate(tab!.id!, "translate", (await config()).mode);
+      }
+      if (action === "site-never") {
+        delete sites[o];
+        rules[o] = { ...rules[o], mode: "never" };
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        await registerSite(o, "never");
+        return activate(tab!.id!, "original").catch(() => {});
+      }
+      if (action === "site-article") {
+        const nextArticle = !rules[o]?.articleOnly;
+        rules[o] = { ...rules[o], articleOnly: nextArticle };
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        return activate(tab!.id!, "translate", (await config()).mode);
+      }
+      if (action === "site-reset") {
+        delete sites[o];
+        delete rules[o];
+        await chrome.storage.local.set({ sites, "site.rules": rules });
+        await registerSite(o, "default");
+        return;
+      }
+    }
+
     return activate(
-      tab.id!,
+      tab!.id!,
       ["chinese", "bilingual"].includes(action) ? "translate" : action,
       action,
     );
-  })().catch(() => {});
+  })().catch(async (err) => {
+    // Provide visible feedback when context menu or page injection fails (Q-06).
+    const code = err instanceof Error ? err.message : "PAGE_CONTROL_FAILED";
+    if (tab?.id !== undefined) {
+      try {
+        await chrome.tabs.sendMessage(
+          tab.id,
+          { type: "CONTROL", command: "notify-error", code },
+          { frameId: 0 },
+        );
+        return;
+      } catch {
+        // Page does not allow content scripts (e.g. chrome:// or Web Store): open settings with status hash
+      }
+    }
+    if (
+      code === "WEB_PAGE_REQUIRED" ||
+      code === "SITE_PERMISSION_REQUIRED" ||
+      code === "PAGE_CONTROL_FAILED"
+    ) {
+      await chrome.tabs
+        .create({
+          url:
+            chrome.runtime.getURL("options.html") +
+            `#service?notice=${encodeURIComponent(code)}`,
+          active: true,
+        })
+        .catch(() => {});
+    }
+  });
 });
+
 async function migrate(code: string, t: Trace) {
   requireValue(/^\d{6}$/.test(code), "MIGRATION_CODE_REQUIRED");
   const response = await chrome.runtime.sendMessage(OLD_ID, {
@@ -754,6 +1384,8 @@ async function migrate(code: string, t: Trace) {
     "ui.position": data.position,
     "migration.result": {
       time: Date.now(),
+      migratedAt: Date.now(),
+      hasKey: !!c.apiKey,
       oldId: OLD_ID,
       cacheBuckets: data.caches?.length || 0,
     },
@@ -798,10 +1430,5 @@ async function migrate(code: string, t: Trace) {
     "MIGRATION_KEY_VERIFY_FAILED",
   );
   await chrome.runtime.sendMessage(OLD_ID, { type: "QINGYI_MIGRATED", code });
-  return {
-    keyVerified: true,
-    hasKey: !!c.apiKey,
-    sites: Object.keys(data.sites || {}).length,
-    cacheBuckets: data.caches?.length || 0,
-  };
+  return { hasKey: !!c.apiKey, cacheBuckets: data.caches?.length || 0 };
 }

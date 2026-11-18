@@ -1,0 +1,20 @@
+{
+  "extName": {
+    "message": "Qingyi · AI Web Translator"
+  },
+  "extDescription": {
+    "message": "Context-menu & selection translation, local-first routing, compressed dictionary packs, low-write cache, and redacted diagnostics."
+  },
+  "cmdTranslatePage": {
+    "message": "Translate current page"
+  },
+  "cmdToggleMode": {
+    "message": "Toggle translated / bilingual view"
+  },
+  "cmdRestoreOriginal": {
+    "message": "Restore original text"
+  },
+  "cmdTranslateSelection": {
+    "message": "Translate selected text"
+  }
+}

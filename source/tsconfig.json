@@ -4,11 +4,21 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
     "types": ["chrome", "node"],
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "design-system/**/*.ts",
+    "design-system/**/*.tsx",
+    "shared/**/*.json",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts"
+  ]
 }

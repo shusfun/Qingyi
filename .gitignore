@@ -1,6 +1,7 @@
 /extension/
 /releases/
 /source/node_modules/
+/source/.runs/
 *.log
 *.part
 .DS_Store

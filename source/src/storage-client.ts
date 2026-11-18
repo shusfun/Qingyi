@@ -11,7 +11,6 @@ export async function ensureOffscreen() {
       });
     const data = await chrome.storage.local.get(CONFIG_KEY),
       budget = data[CONFIG_KEY]?.budgetBytes || DEFAULTS.budgetBytes;
-    let last: unknown;
     for (let i = 0; i < 60; i++) {
       try {
         const ready = await chrome.runtime.sendMessage({
@@ -22,7 +21,6 @@ export async function ensureOffscreen() {
         if (ready?.ok) return;
         if (ready?.error) throw new Error(ready.error);
       } catch (e) {
-        last = e;
         if (e instanceof Error && !e.message.includes("Receiving end")) throw e;
       }
       await new Promise((r) => setTimeout(r, 25));
@@ -70,6 +68,23 @@ export function record(
         trace,
         event,
         fields,
+      }),
+    )
+    .catch((e) => {
+      if (e instanceof Error && e.message.includes("Receiving end"))
+        creating = undefined;
+    });
+}
+export function recordBatch(
+  events: { trace: Trace; event: string; fields?: Record<string, unknown> }[],
+) {
+  if (!events.length) return;
+  void ensureOffscreen()
+    .then(() =>
+      chrome.runtime.sendMessage({
+        target: "qingyi-offscreen",
+        operation: "trace.recordBatch",
+        events,
       }),
     )
     .catch((e) => {

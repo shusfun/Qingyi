@@ -1,0 +1,20 @@
+{
+  "extName": {
+    "message": "轻译 · AI 网页翻译"
+  },
+  "extDescription": {
+    "message": "右键与划词翻译、本地模型优先路由、压缩词库、低写入缓存与脱敏诊断。"
+  },
+  "cmdTranslatePage": {
+    "message": "翻译当前页面"
+  },
+  "cmdToggleMode": {
+    "message": "切换译文模式 / 双语对照"
+  },
+  "cmdRestoreOriginal": {
+    "message": "恢复页面原文"
+  },
+  "cmdTranslateSelection": {
+    "message": "翻译当前选中文字"
+  }
+}

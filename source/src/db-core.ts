@@ -11,7 +11,10 @@ import {
   sha256,
   requireValue,
   normalizeSource,
+  normalizeLang,
+  inferScriptLang,
   encoder,
+  decoder,
   validTranslation,
   type CacheInput,
   type CacheEntry,
@@ -20,6 +23,7 @@ import {
   type Trace,
 } from "./types";
 import { childTrace, type TraceBuffer } from "./trace";
+
 type SQL = any;
 interface Pending {
   entry: CacheEntry;
@@ -39,10 +43,17 @@ interface PackState {
   enabled: number;
   priority: number;
 }
+interface DecodedBlock {
+  raw: Uint8Array;
+  offsets: number[];
+  slots: unknown[];
+}
+
 const schema = `
 PRAGMA journal_mode=PERSIST; PRAGMA synchronous=FULL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-32768; PRAGMA journal_size_limit=16777216;
 CREATE TABLE IF NOT EXISTS blocks(id TEXT PRIMARY KEY,codec INTEGER NOT NULL,raw_bytes INTEGER NOT NULL,data BLOB NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS model(k BLOB PRIMARY KEY,block_id TEXT NOT NULL,slot INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS model_blocks(seq INTEGER PRIMARY KEY AUTOINCREMENT,block_id TEXT UNIQUE NOT NULL,bytes INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS local_model(k BLOB PRIMARY KEY,block_id TEXT NOT NULL,slot INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS local_blocks(seq INTEGER PRIMARY KEY AUTOINCREMENT,block_id TEXT UNIQUE NOT NULL,bytes INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS local_model_block ON local_model(block_id);
@@ -69,19 +80,46 @@ CREATE TRIGGER IF NOT EXISTS count_revision_delete AFTER DELETE ON revisions BEG
 CREATE TRIGGER IF NOT EXISTS count_block_insert AFTER INSERT ON blocks BEGIN UPDATE totals SET v=v+length(new.data) WHERE k='block'; UPDATE totals SET v=v+new.raw_bytes WHERE k='raw'; END;
 CREATE TRIGGER IF NOT EXISTS count_block_delete AFTER DELETE ON blocks BEGIN UPDATE totals SET v=v-length(old.data) WHERE k='block'; UPDATE totals SET v=v-old.raw_bytes WHERE k='raw'; END;
 PRAGMA user_version=1;`;
+
 const bytesKey = (hex: string) =>
   Uint8Array.from(hex.match(/../g)!, (h) => parseInt(h, 16));
+
 export async function entryKey(entry: CacheInput, model = true) {
   return sha256(
     JSON.stringify([
       normalizeSource(entry.source),
-      entry.sourceLang,
-      entry.targetLang,
+      normalizeLang(entry.sourceLang),
+      normalizeLang(entry.targetLang),
       entry.domain,
       model ? entry.scope : "",
     ]),
   );
 }
+
+function buildLineOffsets(raw: Uint8Array): number[] {
+  const offsets: number[] = [0];
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 10 && i + 1 < raw.length) offsets.push(i + 1);
+  }
+  return offsets;
+}
+
+function readSlotFromBlock(blk: DecodedBlock, slot: number): unknown {
+  if (slot < 0 || slot >= blk.offsets.length) return undefined;
+  const existing = blk.slots[slot];
+  if (existing !== undefined) return existing;
+  const start = blk.offsets[slot];
+  let end =
+    slot + 1 < blk.offsets.length ? blk.offsets[slot + 1] - 1 : blk.raw.length;
+  while (end > start && (blk.raw[end - 1] === 10 || blk.raw[end - 1] === 13)) {
+    end--;
+  }
+  if (end <= start) return undefined;
+  const parsed = JSON.parse(decoder.decode(blk.raw.subarray(start, end)));
+  blk.slots[slot] = parsed;
+  return parsed;
+}
+
 export function validateManifest(m: PackManifest) {
   requireValue(
     m?.format === "qingyi-pack-v1" && /^[\w.-]{1,80}$/.test(m.id),
@@ -155,16 +193,17 @@ export function validateManifest(m: PackManifest) {
   );
   return m;
 }
+
 export class CacheDatabase {
   readonly hot = new ByteLRU<string>(8 * MiB);
-  readonly decoded = new ByteLRU<unknown[]>(16 * MiB);
+  readonly decoded = new ByteLRU<DecodedBlock>(16 * MiB);
   private pending = new Map<string, Pending>();
   private pendingBytes = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private dirtyAt = 0;
   private writeError = "";
   private flushing = Promise.resolve();
-  private decoding = new Map<string, Promise<unknown[]>>();
+  private decoding = new Map<string, Promise<DecodedBlock>>();
   private budget = 4 * 1024 * MiB;
   private gcCursor = "";
   metrics = {
@@ -193,6 +232,12 @@ export class CacheDatabase {
   }
   private value(sql: string, bind: unknown[] = []): any {
     return this.db.selectValue(sql, bind.length ? bind : undefined);
+  }
+  private nullableNumber(sql: string, bind: unknown[] = []): number | null {
+    const v = this.value(sql, bind);
+    if (v === null || v === undefined) return null;
+    const num = Number(v);
+    return Number.isFinite(num) ? num : null;
   }
   private audit(
     t: Trace,
@@ -265,13 +310,18 @@ export class CacheDatabase {
       `PRAGMA max_page_count=${Math.floor((bytes - Math.max(40 * MiB, bytes * 0.15)) / size)}`,
     );
   }
-  private async checkSpace(bytes: number) {
+  private usedDbBytes(): number {
     const pages = Number(this.value("PRAGMA page_count")),
       free = Number(this.value("PRAGMA freelist_count")),
       pageSize = Number(this.value("PRAGMA page_size"));
+    return (pages - free) * pageSize;
+  }
+  private usableBudgetBytes(): number {
+    return this.budget - Math.max(40 * MiB, this.budget * 0.15);
+  }
+  private async checkSpace(bytes: number) {
     requireValue(
-      (pages - free) * pageSize + bytes <
-        this.budget - Math.max(40 * MiB, this.budget * 0.15),
+      this.usedDbBytes() + bytes < this.usableBudgetBytes(),
       "CACHE_BUDGET_EXCEEDED",
     );
     if (typeof globalThis.navigator !== "undefined" && navigator.storage) {
@@ -282,7 +332,8 @@ export class CacheDatabase {
       );
     }
   }
-  private async block(id: string) {
+  // Lazy per-slot block cache (Q-T19): avoids full-block JSON.parse on random misses.
+  private async block(id: string): Promise<DecodedBlock> {
     const cached = this.decoded.get(id);
     if (cached) return cached;
     const existing = this.decoding.get(id);
@@ -295,9 +346,14 @@ export class CacheDatabase {
       requireValue(row, "MISSING_BLOCK");
       const data = await decompress(row.data, row.codec, row.raw_bytes);
       requireValue(data.length === row.raw_bytes, "CORRUPT_BLOCK");
-      const rows = decodeLines(data);
-      this.decoded.set(id, rows, data.length * 3 + rows.length * 256);
-      return rows;
+      const offsets = buildLineOffsets(data);
+      const blk: DecodedBlock = {
+        raw: data,
+        offsets,
+        slots: new Array(offsets.length),
+      };
+      this.decoded.set(id, blk, data.length + offsets.length * 16 + 64);
+      return blk;
     })();
     this.decoding.set(id, decoding);
     try {
@@ -306,20 +362,44 @@ export class CacheDatabase {
       this.decoding.delete(id);
     }
   }
-  private async translation(row: any, input: CacheInput) {
+  private async translation(
+    row: any,
+    input: CacheInput,
+    healTable?: "model" | "local_model",
+    healKeyHex?: string,
+    t?: Trace,
+  ): Promise<string | null> {
     if (!row?.block_id) return null;
-    const item = (await this.block(row.block_id))[
-      row.slot
-    ] as Partial<CacheEntry>;
-    if (
-      item &&
-      normalizeSource(item.source || "") === normalizeSource(input.source) &&
-      validTranslation(input.source, item.translation)
-    )
+    const blk = await this.block(row.block_id);
+    const item = readSlotFromBlock(blk, row.slot) as
+      | Partial<CacheEntry>
+      | undefined;
+    if (!item) return null;
+    if (normalizeSource(item.source || "") !== normalizeSource(input.source)) {
+      return null;
+    }
+    if (validTranslation(input.source, item.translation)) {
       return item.translation;
+    }
+    // Self-heal bad/misordered cached model entries on read (Q-T02).
+    if (healTable && healKeyHex) {
+      try {
+        this.exec(`DELETE FROM ${healTable} WHERE k=?`, [bytesKey(healKeyHex)]);
+        this.hot.delete(healKeyHex);
+        if (t) {
+          this.trace.record(childTrace(t), "cache.heal", {
+            outcome: "fallback",
+            reason: "INVALID_CACHED_PLACEHOLDERS",
+            items: 1,
+          });
+        }
+      } catch {
+        // Ignore read-heal write failure
+      }
+    }
     return null;
   }
-  async lookup(inputs: CacheInput[], t: Trace) {
+  async lookup(inputs: CacheInput[], t: Trace, dictionaryOnly = false) {
     requireValue(inputs.length <= 64, "LOOKUP_LIMIT");
     const span = childTrace(t),
       started = performance.now(),
@@ -333,32 +413,79 @@ export class CacheDatabase {
       "SELECT * FROM packs WHERE active>0 AND enabled=1 ORDER BY priority DESC,id",
     );
     const resolve = async (input: CacheInput, index: number) => {
-      const key = await entryKey(input),
-        hot = this.hot.get(key),
-        pending = this.pending.get(key);
-      let result: string | null = hot ?? null,
+      const normInputLang = normalizeLang(input.sourceLang);
+      const normTargetLang = normalizeLang(input.targetLang);
+      const inferredLang =
+        normInputLang === "auto"
+          ? inferScriptLang(input.source)
+          : normInputLang;
+      const normalizedInput: CacheInput = {
+        ...input,
+        sourceLang: normInputLang,
+        targetLang: normTargetLang,
+      };
+      const key = await entryKey(normalizedInput);
+      const hot = !dictionaryOnly ? this.hot.get(key) : undefined;
+      const pending = !dictionaryOnly ? this.pending.get(key) : undefined;
+      let result: string | null =
+          hot && validTranslation(input.source, hot) ? hot : null,
         source = result ? "memory" : "";
-      const plain = bytesKey(await entryKey(input, false));
+      if (hot && !result) this.hot.delete(key);
+
       if (!result) {
-        const row = this.one(
-          "SELECT block_id,slot FROM revisions WHERE k=? ORDER BY revision DESC LIMIT 1",
-          [plain],
-        );
-        result = await this.translation(row, input);
-        if (result) source = "user";
+        const candidateLangs = [normInputLang];
+        if (inferredLang !== normInputLang && inferredLang !== "auto") {
+          candidateLangs.push(inferredLang);
+        }
+        if (normInputLang !== "auto") candidateLangs.push("auto");
+        const candidateDomains = [input.domain];
+        if (input.domain !== "*" && input.domain !== "") {
+          candidateDomains.push("*", "");
+        }
+        outerRevision: for (const dom of candidateDomains) {
+          for (const sl of candidateLangs) {
+            const plain = bytesKey(
+              await entryKey(
+                { ...normalizedInput, domain: dom, sourceLang: sl },
+                false,
+              ),
+            );
+            const row = this.one(
+              "SELECT block_id,slot FROM revisions WHERE k=? ORDER BY revision DESC LIMIT 1",
+              [plain],
+            );
+            result = await this.translation(row, input);
+            if (result) {
+              source = "user";
+              break outerRevision;
+            }
+          }
+        }
       }
-      if (!result)
+      if (!result) {
         for (const pack of packs as PackState[]) {
+          const normPackSource = normalizeLang(pack.source_lang);
+          const normPackTarget = normalizeLang(pack.target_lang);
+          const langOk =
+            normPackSource === "*" ||
+            normPackSource === normInputLang ||
+            (normInputLang === "auto" && normPackSource === inferredLang);
           if (
-            (pack.source_lang !== "*" &&
-              pack.source_lang !== input.sourceLang) ||
-            pack.target_lang !== input.targetLang ||
+            !langOk ||
+            normPackTarget !== normTargetLang ||
             (pack.domain !== "*" && pack.domain !== input.domain)
-          )
+          ) {
             continue;
+          }
+          // Try pack's raw source_lang key (matches how pack rows were inserted)
           const pk = bytesKey(
             await entryKey(
-              { ...input, domain: pack.domain, sourceLang: pack.source_lang },
+              {
+                ...normalizedInput,
+                domain: pack.domain,
+                sourceLang: pack.source_lang,
+                targetLang: pack.target_lang,
+              },
               false,
             ),
           );
@@ -374,26 +501,36 @@ export class CacheDatabase {
             }
           }
         }
-      if (!result && pending) {
-        result = pending.entry.translation;
-        source = "pending";
       }
-      if (!result) {
-        const row = this.one(
-          "SELECT block_id,slot FROM " +
-            (input.scope.startsWith("local:") ? "local_model" : "model") +
-            " WHERE k=?",
-          [bytesKey(key)],
-        );
-        result = await this.translation(row, input);
-        if (result) source = "model";
+      if (!dictionaryOnly) {
+        if (!result && pending) {
+          if (validTranslation(input.source, pending.entry.translation)) {
+            result = pending.entry.translation;
+            source = "pending";
+          } else {
+            this.pendingBytes -= pending.bytes;
+            this.pending.delete(key);
+          }
+        }
+        if (!result) {
+          const table = input.scope.startsWith("local:")
+            ? "local_model"
+            : "model";
+          const row = this.one(
+            "SELECT block_id,slot FROM " + table + " WHERE k=?",
+            [bytesKey(key)],
+          );
+          result = await this.translation(row, input, table, key, span);
+          if (result) source = "model";
+        }
+        if (result) {
+          this.hot.set(
+            key,
+            result,
+            encoder.encode(input.source + result).length + 128,
+          );
+        }
       }
-      if (result)
-        this.hot.set(
-          key,
-          result,
-          encoder.encode(input.source + result).length + 128,
-        );
       out[index] = result;
       sources[index] = source || "miss";
     };
@@ -436,15 +573,20 @@ export class CacheDatabase {
     for (const input of inputs) {
       const key = await entryKey(input);
       const pending = this.pending.get(key);
+      if (pending) {
+        if (validTranslation(input.source, pending.entry.translation)) {
+          translations.push(pending.entry.translation);
+          continue;
+        }
+        this.pendingBytes -= pending.bytes;
+        this.pending.delete(key);
+      }
+      const table = input.scope.startsWith("local:") ? "local_model" : "model";
       const row = this.one(
-        "SELECT block_id,slot FROM " +
-          (input.scope.startsWith("local:") ? "local_model" : "model") +
-          " WHERE k=?",
+        "SELECT block_id,slot FROM " + table + " WHERE k=?",
         [bytesKey(key)],
       );
-      translations.push(
-        pending?.entry.translation || (await this.translation(row, input)),
-      );
+      translations.push(await this.translation(row, input, table, key, span));
     }
     const hits = translations.filter(Boolean).length;
     this.trace.record(span, "cache.legacy", {
@@ -456,7 +598,12 @@ export class CacheDatabase {
     return { translations, hits };
   }
   async enqueue(entries: CacheEntry[], t: Trace) {
-    for (const entry of entries) {
+    for (const rawEntry of entries) {
+      const entry: CacheEntry = {
+        ...rawEntry,
+        sourceLang: normalizeLang(rawEntry.sourceLang),
+        targetLang: normalizeLang(rawEntry.targetLang),
+      };
       requireValue(
         entry.source.length <= 24000 &&
           validTranslation(entry.source, entry.translation),
@@ -465,16 +612,22 @@ export class CacheDatabase {
       const key = await entryKey(entry);
       if (this.pending.get(key)?.entry.translation === entry.translation)
         continue;
+      const table = entry.scope.startsWith("local:") ? "local_model" : "model";
       const existing = this.one(
-        "SELECT block_id,slot FROM " +
-          (entry.scope.startsWith("local:") ? "local_model" : "model") +
-          " WHERE k=?",
+        "SELECT block_id,slot FROM " + table + " WHERE k=?",
         [bytesKey(key)],
       );
       if ((await this.translation(existing, entry)) === entry.translation)
         continue;
       const bytes = encoder.encode(JSON.stringify(entry)).length + 128;
-      if (bytes > 8 * MiB) continue;
+      if (bytes > 8 * MiB) {
+        this.trace.record(childTrace(t), "cache.skip", {
+          outcome: "failed",
+          reason: "ENTRY_TOO_LARGE",
+          bytes,
+        });
+        continue;
+      }
       if (
         this.pendingBytes + bytes - (this.pending.get(key)?.bytes || 0) >
         8 * MiB
@@ -581,7 +734,11 @@ export class CacheDatabase {
             Math.max(0, 256 * MiB - incomingLocal),
             batch[0][1].trace,
           );
-        await this.checkSpace(packedBytes + batch.length * 192);
+        const incomingTotal = packedBytes + batch.length * 192;
+        if (this.usedDbBytes() + incomingTotal >= this.usableBudgetBytes()) {
+          this.trimCloud(incomingTotal, batch[0][1].trace);
+        }
+        await this.checkSpace(incomingTotal);
         const resource = sealed[0].id;
         this.transaction(
           batch[0][1].trace,
@@ -621,12 +778,19 @@ export class CacheDatabase {
               stmt.finalize();
               localStmt.finalize();
             }
-            for (const b of sealed)
-              if (b.group[0][1].entry.scope.startsWith("local:"))
+            for (const b of sealed) {
+              if (b.group[0][1].entry.scope.startsWith("local:")) {
                 this.exec(
                   "INSERT OR IGNORE INTO local_blocks(block_id,bytes) VALUES(?,?)",
                   [b.id, b.data.length + b.group.length * 96],
                 );
+              } else {
+                this.exec(
+                  "INSERT OR IGNORE INTO model_blocks(block_id,bytes) VALUES(?,?)",
+                  [b.id, b.data.length + b.group.length * 96],
+                );
+              }
+            }
             for (const c of [...contributors.values()].slice(1))
               this.audit(c.trace, "model.flush.shared", resource, c.items, 0);
           },
@@ -690,6 +854,50 @@ export class CacheDatabase {
       }
     });
     this.hot.clear();
+  }
+  // Automatically evict oldest cloud model blocks when budget is full, preserving packs and user revisions (Q-T14).
+  private trimCloud(incomingBytes: number, trace: Trace) {
+    const needed =
+      this.usedDbBytes() + incomingBytes - this.usableBudgetBytes() + 4 * MiB;
+    if (needed <= 0) return;
+    let reclaimed = 0;
+    this.transaction(trace, "cloud.evict", "model", 0, 0, () => {
+      const stillOver = () =>
+        reclaimed < needed ||
+        this.usedDbBytes() + incomingBytes >= this.usableBudgetBytes();
+      const tracked = this.all(
+        "SELECT block_id,bytes FROM model_blocks ORDER BY seq",
+      );
+      for (const b of tracked) {
+        if (!stillOver()) break;
+        this.exec("DELETE FROM model WHERE block_id=?", [b.block_id]);
+        this.exec("DELETE FROM model_blocks WHERE block_id=?", [b.block_id]);
+        this.exec(
+          "DELETE FROM blocks WHERE id=? AND NOT EXISTS(SELECT 1 FROM local_model WHERE block_id=?) AND NOT EXISTS(SELECT 1 FROM pack_rows WHERE block_id=?) AND NOT EXISTS(SELECT 1 FROM revisions WHERE block_id=?)",
+          [b.block_id, b.block_id, b.block_id, b.block_id],
+        );
+        this.decoded.delete(b.block_id);
+        reclaimed += b.bytes;
+      }
+      if (stillOver()) {
+        // Also evict legacy cloud blocks created prior to model_blocks tracking
+        const legacy = this.all(
+          "SELECT DISTINCT m.block_id, length(b.data) AS bytes FROM model m JOIN blocks b ON b.id=m.block_id LIMIT 256",
+        );
+        for (const b of legacy) {
+          if (!stillOver()) break;
+          this.exec("DELETE FROM model WHERE block_id=?", [b.block_id]);
+          this.exec("DELETE FROM model_blocks WHERE block_id=?", [b.block_id]);
+          this.exec(
+            "DELETE FROM blocks WHERE id=? AND NOT EXISTS(SELECT 1 FROM local_model WHERE block_id=?) AND NOT EXISTS(SELECT 1 FROM pack_rows WHERE block_id=?) AND NOT EXISTS(SELECT 1 FROM revisions WHERE block_id=?)",
+            [b.block_id, b.block_id, b.block_id, b.block_id],
+          );
+          this.decoded.delete(b.block_id);
+          reclaimed += Number(b.bytes) || 1024;
+        }
+      }
+    });
+    if (reclaimed > 0) this.hot.clear();
   }
   async startPack(manifest: PackManifest, t: Trace) {
     const m = validateManifest(manifest),
@@ -1002,12 +1210,18 @@ export class CacheDatabase {
     this.hot.clear();
     return { active: p.previous };
   }
-  async revision(entry: CacheEntry, t: Trace) {
+  async revision(rawEntry: CacheEntry, t: Trace) {
+    const entry: CacheEntry = {
+      ...rawEntry,
+      sourceLang: normalizeLang(rawEntry.sourceLang),
+      targetLang: normalizeLang(rawEntry.targetLang),
+    };
     requireValue(
       validTranslation(entry.source, entry.translation),
       "INVALID_TRANSLATION",
     );
-    const key = bytesKey(await entryKey(entry, false)),
+    const keyHex = await entryKey(entry, false);
+    const key = bytesKey(keyHex),
       raw = encodeLines([entry]),
       packed = await compress(raw),
       id = await sha256(raw),
@@ -1027,7 +1241,7 @@ export class CacheDatabase {
     this.transaction(
       t,
       "revision.save",
-      await entryKey(entry, false),
+      keyHex,
       1,
       packed.data.length + 192,
       () => {
@@ -1055,7 +1269,12 @@ export class CacheDatabase {
     return { revision: rev };
   }
   revisionHistory(input: CacheInput) {
-    return entryKey(input, false).then((k) =>
+    const normalized: CacheInput = {
+      ...input,
+      sourceLang: normalizeLang(input.sourceLang),
+      targetLang: normalizeLang(input.targetLang),
+    };
+    return entryKey(normalized, false).then((k) =>
       this.all(
         "SELECT revision,time,trace_id FROM revisions WHERE k=? ORDER BY revision DESC",
         [bytesKey(k)],
@@ -1071,8 +1290,9 @@ export class CacheDatabase {
     this.writeError = "";
     this.dirtyAt = 0;
     const count =
-      Number(this.value("SELECT v FROM totals WHERE k='model'")) +
-      Number(this.value("SELECT count(*) FROM local_model"));
+      Number(
+        this.value("SELECT coalesce((SELECT v FROM totals WHERE k='model'),0)"),
+      ) + Number(this.value("SELECT count(*) FROM local_model"));
     if (count)
       this.transaction(
         t,
@@ -1085,6 +1305,9 @@ export class CacheDatabase {
             "DELETE FROM model WHERE k IN (SELECT k FROM model LIMIT 256)",
           );
           this.exec(
+            "DELETE FROM model_blocks WHERE NOT EXISTS(SELECT 1 FROM model WHERE model.block_id=model_blocks.block_id)",
+          );
+          this.exec(
             "DELETE FROM local_model WHERE k IN (SELECT k FROM local_model LIMIT 256)",
           );
           this.exec(
@@ -1094,6 +1317,58 @@ export class CacheDatabase {
       );
     this.hot.clear();
     return { cleared: Math.min(count, 256), more: count > 256 };
+  }
+  async purgeInvalidModels(t: Trace) {
+    await this.flushing.catch(() => {});
+    const invalidCloud: Uint8Array[] = [];
+    const invalidLocal: Uint8Array[] = [];
+    let scanned = 0;
+    for (const table of ["model", "local_model"] as const) {
+      const rows = this.all(`SELECT k,block_id,slot FROM ${table}`);
+      for (const row of rows) {
+        scanned++;
+        const blk = await this.block(row.block_id).catch(() => null);
+        const item = blk
+          ? (readSlotFromBlock(blk, row.slot) as
+              | Partial<CacheEntry>
+              | undefined)
+          : undefined;
+        if (
+          !item ||
+          typeof item.source !== "string" ||
+          !validTranslation(item.source, item.translation)
+        ) {
+          if (table === "model") invalidCloud.push(row.k);
+          else invalidLocal.push(row.k);
+        }
+      }
+    }
+    const purged = invalidCloud.length + invalidLocal.length;
+    if (purged > 0) {
+      this.transaction(
+        t,
+        "model.purge_invalid",
+        "model",
+        purged,
+        purged * 256,
+        () => {
+          for (const k of invalidCloud) {
+            this.exec("DELETE FROM model WHERE k=?", [k]);
+          }
+          for (const k of invalidLocal) {
+            this.exec("DELETE FROM local_model WHERE k=?", [k]);
+          }
+          this.exec(
+            "DELETE FROM model_blocks WHERE NOT EXISTS(SELECT 1 FROM model WHERE model.block_id=model_blocks.block_id)",
+          );
+          this.exec(
+            "DELETE FROM local_blocks WHERE NOT EXISTS(SELECT 1 FROM local_model WHERE local_model.block_id=local_blocks.block_id)",
+          );
+        },
+      );
+      this.hot.clear();
+    }
+    return { scanned, purged };
   }
   deletePack(id: string, t: Trace) {
     requireValue(
@@ -1135,7 +1410,9 @@ export class CacheDatabase {
   }
   clearRevisions(t: Trace) {
     const count = Number(
-      this.value("SELECT v FROM totals WHERE k='revisions'"),
+      this.value(
+        "SELECT coalesce((SELECT v FROM totals WHERE k='revisions'),0)",
+      ),
     );
     if (count)
       this.transaction(
@@ -1177,13 +1454,119 @@ export class CacheDatabase {
     return { saved: true };
   }
   async readRevision(input: CacheInput, revision: number) {
-    const key = bytesKey(await entryKey(input, false)),
+    const normalized: CacheInput = {
+      ...input,
+      sourceLang: normalizeLang(input.sourceLang),
+      targetLang: normalizeLang(input.targetLang),
+    };
+    const key = bytesKey(await entryKey(normalized, false)),
       row = this.one(
         "SELECT block_id,slot FROM revisions WHERE k=? AND revision=?",
         [key, revision],
       );
     requireValue(row, "REVISION_UNAVAILABLE");
-    return (await this.block(row.block_id))[row.slot];
+    const blk = await this.block(row.block_id);
+    return readSlotFromBlock(blk, row.slot);
+  }
+  // Export active user revisions and enabled dictionary entries for one-way sync to mistral-gui (Prompt item 11).
+  async exportSyncData(
+    sinceTime = 0,
+    packVersions: Record<string, number> = {},
+  ) {
+    const revRows = this.all(
+      "SELECT r.block_id, r.slot, r.revision, r.time FROM revisions r JOIN (SELECT k, max(revision) AS max_rev FROM revisions GROUP BY k) m ON r.k = m.k AND r.revision = m.max_rev ORDER BY r.time ASC LIMIT 20001",
+    );
+    requireValue(revRows.length <= 20000, "SYNC_LIMIT_EXCEEDED");
+    const revisions: {
+      source: string;
+      translation: string;
+      sourceLang: string;
+      targetLang: string;
+      domain: string;
+      revision: number;
+      time: number;
+    }[] = [];
+    let maxRevisionTime = sinceTime;
+    for (const row of revRows) {
+      const blk = await this.block(row.block_id);
+      const item = readSlotFromBlock(blk, row.slot) as CacheEntry | undefined;
+      if (item?.source && item?.translation) {
+        revisions.push({
+          source: normalizeSource(item.source),
+          translation: item.translation,
+          sourceLang: normalizeLang(item.sourceLang),
+          targetLang: normalizeLang(item.targetLang),
+          domain: item.domain || "*",
+          revision: row.revision,
+          time: row.time,
+        });
+        if (row.time > maxRevisionTime) maxRevisionTime = row.time;
+      }
+    }
+
+    const activePacks = this.all(
+      "SELECT * FROM packs WHERE active>0 AND enabled=1 ORDER BY priority DESC, id",
+    ) as PackState[];
+    const packs: {
+      id: string;
+      version: number;
+      priority: number;
+      sourceLang: string;
+      targetLang: string;
+      domain: string;
+      unchanged?: boolean;
+      entries: { source: string; translation: string }[];
+    }[] = [];
+
+    for (const p of activePacks) {
+      if (packVersions[p.id] === p.active) {
+        packs.push({
+          id: p.id,
+          version: p.active,
+          priority: p.priority,
+          sourceLang: normalizeLang(p.source_lang),
+          targetLang: normalizeLang(p.target_lang),
+          domain: p.domain,
+          unchanged: true,
+          entries: [],
+        });
+        continue;
+      }
+      const rows = this.all(
+        "SELECT block_id, slot FROM pack_rows WHERE pack=? AND vfrom>=? AND vfrom<=? AND (vto IS NULL OR vto>?) AND deleted=0 LIMIT 50001",
+        [p.id, p.root, p.active, p.active],
+      );
+      requireValue(rows.length <= 50000, "SYNC_LIMIT_EXCEEDED");
+      const entries: { source: string; translation: string }[] = [];
+      for (const r of rows) {
+        if (!r.block_id) continue;
+        const blk = await this.block(r.block_id);
+        const item = readSlotFromBlock(blk, r.slot) as PackEntry | undefined;
+        if (item?.source && item?.translation && !item.deleted) {
+          entries.push({
+            source: normalizeSource(item.source),
+            translation: item.translation,
+          });
+        }
+      }
+      packs.push({
+        id: p.id,
+        version: p.active,
+        priority: p.priority,
+        sourceLang: normalizeLang(p.source_lang),
+        targetLang: normalizeLang(p.target_lang),
+        domain: p.domain,
+        entries,
+      });
+    }
+
+    return {
+      revisions,
+      revisionsSnapshot: true,
+      packs,
+      activePackIds: activePacks.map((p) => p.id),
+      maxRevisionTime,
+    };
   }
   async collect(t: Trace, cancelled: () => boolean = () => false) {
     const hour = Math.floor(this.now() / 3600000),
@@ -1279,8 +1662,10 @@ export class CacheDatabase {
             row.k,
             row.vfrom,
           ]);
-        for (const row of chosen)
+        for (const row of chosen) {
+          this.exec("DELETE FROM model_blocks WHERE block_id=?", [row.id]);
           this.exec("DELETE FROM blocks WHERE id=?", [row.id]);
+        }
         for (const row of retired)
           this.exec("DELETE FROM snapshots WHERE pack=? AND version=?", [
             row.pack,
@@ -1299,27 +1684,33 @@ export class CacheDatabase {
       more: !!this.gcCursor || expired.length > 0 || retired.length > 0,
     };
   }
+  // Use nullableNumber on totals so missing rows yield null -> "未知" instead of 0 (Q-V5).
   status(t?: Trace) {
     const packs = this.all(
       "SELECT p.*,s.entries,s.raw_bytes FROM packs p LEFT JOIN snapshots s ON s.pack=p.id AND s.version=p.active ORDER BY p.priority DESC,p.id",
     );
     return {
       packs,
-      modelEntries: Number(this.value("SELECT v FROM totals WHERE k='model'")),
-      localModelEntries: Number(this.value("SELECT count(*) FROM local_model")),
-      localModelBytes: Number(
-        this.value("SELECT coalesce(sum(bytes),0) FROM local_blocks"),
+      modelEntries: this.nullableNumber("SELECT v FROM totals WHERE k='model'"),
+      localModelEntries: this.nullableNumber(
+        "SELECT count(*) FROM local_model",
       ),
+      localModelBytes:
+        this.nullableNumber(
+          "SELECT coalesce(sum(bytes),0) FROM local_blocks",
+        ) ?? 0,
       localModelBudgetBytes: 256 * MiB,
-      revisions: Number(this.value("SELECT v FROM totals WHERE k='revisions'")),
+      revisions: this.nullableNumber(
+        "SELECT v FROM totals WHERE k='revisions'",
+      ),
       dbBytes:
         Number(this.value("PRAGMA page_count")) *
         Number(this.value("PRAGMA page_size")),
       freeBytes:
         Number(this.value("PRAGMA freelist_count")) *
         Number(this.value("PRAGMA page_size")),
-      blockBytes: Number(this.value("SELECT v FROM totals WHERE k='block'")),
-      rawBytes: Number(this.value("SELECT v FROM totals WHERE k='raw'")),
+      blockBytes: this.nullableNumber("SELECT v FROM totals WHERE k='block'"),
+      rawBytes: this.nullableNumber("SELECT v FROM totals WHERE k='raw'"),
       pending: this.pending.size,
       pendingBytes: this.pendingBytes,
       writeError: this.writeError,

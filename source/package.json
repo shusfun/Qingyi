@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.54.1-build1",
-    "pdfjs-dist": "^4.10.38",
-    "preact": "^10.25.0"
+    "pdfjs-dist": "6.5.438",
+    "preact": "11.2.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

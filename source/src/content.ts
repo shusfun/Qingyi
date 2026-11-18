@@ -17,6 +17,7 @@ import {
 } from "./dom-collect";
 import { PagePriorityQueue, type UnitPriorityTier } from "./page-queue";
 import { createInPageOverlay } from "./inpage/overlay";
+import { rebuildParagraphs } from "./paragraph-rebuild";
 
 declare global {
   interface Window {
@@ -318,7 +319,7 @@ async function launch() {
       rendered: pq.renderedCount,
       discovered: pq.discoveredCount,
       hits,
-      queued: pq.queuedSize,
+      queued: pq.activeQueuedSize,
       requests,
       failed: pq.failedCount,
       capped: unitLimitReached,
@@ -615,7 +616,7 @@ async function launch() {
           }
         }
       }
-      if (pageForeground && pq.queuedSize > 0) kick();
+      if (pageForeground && pq.activeQueuedSize > 0) kick();
       // Only update status message if new segments were actually discovered (fixes Q-26 flashing!).
       if (pq.discoveredCount > beforeDiscovered && running > 0) {
         updateProgress(
@@ -641,12 +642,12 @@ async function launch() {
           items: pq.discoveredCount,
         });
         if (
-          !pq.queuedSize &&
+          !pq.activeQueuedSize &&
           !running &&
           pq.discoveredCount > beforeDiscovered
         ) {
           complete();
-        } else if (beforeDiscovered === 0 && !pq.queuedSize && !running) {
+        } else if (beforeDiscovered === 0 && !pq.activeQueuedSize && !running) {
           complete();
         }
       }
@@ -812,7 +813,7 @@ async function launch() {
   }
 
   function complete() {
-    if (!active || scanning || running || pq.queuedSize > 0) return;
+    if (!active || scanning || running || pq.activeQueuedSize > 0) return;
     const isEn = overlay.getLang() === "en";
     const failed = pq.failedCount;
     if (failed > 0) {
@@ -885,7 +886,7 @@ async function launch() {
 
   function kick() {
     if (!active || !trace || !pageForeground) return;
-    while (running < (info.concurrency || 2) && pq.queuedSize > 0) {
+    while (running < (info.concurrency || 2) && pq.activeQueuedSize > 0) {
       const maxItems = batchMaxItems();
       const maxChars = first ? 1600 : 5000;
       const dequeued = pq.dequeueBatch({
@@ -1120,9 +1121,6 @@ async function launch() {
           }
         })
         .finally(() => {
-          for (const u of batch) {
-            if (!pq.queuedSize) u.queued = false;
-          }
           running--;
           if (active && pageForeground) {
             kick();
@@ -1249,11 +1247,7 @@ async function launch() {
 
     const isEn = overlay.getLang() === "en";
     if (kind === "original") {
-      updateProgress(
-        isEn ? "Restored original text" : "已恢复原文",
-        "",
-        "neutral",
-      );
+      overlay.hideProgress();
       return;
     }
     if (kind === "config-updated") {
@@ -1290,7 +1284,6 @@ async function launch() {
   }
 
   function restoreAll() {
-    overlay.hidePeek();
     for (const u of allUnits) {
       restoreUnit(u);
       if (
@@ -1378,59 +1371,126 @@ async function launch() {
     kick();
   }
 
-  // --- Selection Translation ("翻译选中文字", Priority 0, Prompt item 7) ---
-  async function handleSelectionTranslate() {
-    const sel = window.getSelection();
-    const text = sel?.toString().trim() || "";
-    if (!text || !sel || sel.rangeCount === 0) return;
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    overlay.showSelectionPopover({ rect, source: text, loading: true });
+  // --- Selection Translation ("翻译选中文字", Priority 0, ADR 0001 shared paragraph rebuild) ---
+  async function runSelectionSession(sessionState: {
+    rawText: string;
+    customText?: string;
+    preserveLineBreaks: boolean;
+    rect: DOMRect;
+  }) {
+    const baseInput =
+      sessionState.customText !== undefined
+        ? sessionState.customText
+        : sessionState.rawText;
+    const rebuilt = rebuildParagraphs(baseInput, {
+      preserveLineBreaks: sessionState.preserveLineBreaks,
+    });
+    const sources = rebuilt.map((p) => p.merged).filter(Boolean);
+    if (!sources.length) return;
+
+    const joinedSource = sources.join(
+      sessionState.preserveLineBreaks ? "\n" : "\n\n",
+    );
+    const hasLineBreaks = /\r|\n/.test(sessionState.rawText);
+
+    const commonCallbacks = {
+      hasLineBreaks,
+      preserveLineBreaks: sessionState.preserveLineBreaks,
+      canSaveRevision: sources.length === 1,
+      onTogglePreserveLines: (next: boolean) => {
+        void runSelectionSession({
+          ...sessionState,
+          customText: undefined,
+          preserveLineBreaks: next,
+        });
+      },
+      onRetranslateSource: (edited: string) => {
+        void runSelectionSession({
+          ...sessionState,
+          customText: edited,
+        });
+      },
+    };
+
+    overlay.showSelectionPopover({
+      rect: sessionState.rect,
+      source: joinedSource,
+      loading: true,
+      ...commonCallbacks,
+    });
 
     const t = newTrace();
     try {
+      const srcLang = document.documentElement.lang || "auto";
       const cached = await send("LOOKUP", {
-        sources: [text],
-        sourceLang: document.documentElement.lang || "auto",
+        sources,
+        sourceLang: srcLang,
         trace: t,
       });
-      if (cached.translations?.[0]) {
-        overlay.showSelectionPopover({
-          rect,
-          source: text,
-          translation: cached.translations[0],
-          channel: "cache",
+      const outTexts: string[] = new Array(sources.length).fill("");
+      const missingIdx: number[] = [];
+      let usedChannel: "local" | "cloud" | "cache" = "cache";
+
+      sources.forEach((_, idx) => {
+        const hit = cached.translations?.[idx];
+        if (hit) {
+          outTexts[idx] = hit;
+        } else {
+          missingIdx.push(idx);
+        }
+      });
+
+      if (missingIdx.length > 0) {
+        const res = await send("TRANSLATE", {
+          sources: missingIdx.map((i) => sources[i]),
+          sourceLang: srcLang,
+          priority: 0,
+          skipLookup: true,
+          trace: t,
         });
-        return;
+        missingIdx.forEach((origIdx, j) => {
+          const tr = res.translations?.[j];
+          if (!tr) {
+            throw new Error(res.errors?.[j] || "TRANSLATION_FAILED");
+          }
+          outTexts[origIdx] = tr;
+          const ch = res.channels?.[j];
+          if (ch === "local") usedChannel = "local";
+          else if (usedChannel !== "local") usedChannel = "cloud";
+        });
       }
-      const res = await send("TRANSLATE", {
-        sources: [text],
-        sourceLang: document.documentElement.lang || "auto",
-        priority: 0,
-        skipLookup: true,
-        trace: t,
-      });
-      const translated = res.translations?.[0];
-      if (!translated) {
-        const code = res.errors?.[0] || "TRANSLATION_FAILED";
-        throw new Error(code);
-      }
+
       overlay.showSelectionPopover({
-        rect,
-        source: text,
-        translation: translated,
-        channel: res.channels?.[0] || "cloud",
+        rect: sessionState.rect,
+        source: joinedSource,
+        translation: outTexts.join("\n\n"),
+        channel: usedChannel,
+        ...commonCallbacks,
       });
     } catch (err) {
       const resolved = resolveError(err, overlay.getLang());
       overlay.showSelectionPopover({
-        rect,
-        source: text,
+        rect: sessionState.rect,
+        source: joinedSource,
         error: resolved.message,
+        ...commonCallbacks,
       });
     }
   }
 
-  // --- Right-click Target Tracking for "修正此译文" & Hover/Click Original Peek (Prompt item 13) ---
+  async function handleSelectionTranslate() {
+    const sel = window.getSelection();
+    const rawText = sel?.toString().trim() || "";
+    if (!rawText || !sel || sel.rangeCount === 0) return;
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    await runSelectionSession({
+      rawText,
+      preserveLineBreaks: false,
+      rect,
+    });
+  }
+
+  // --- Right-click Target Tracking for "修正此译文" ---
   let lastContextUnit: Unit | undefined;
   let lastContextRect: DOMRect | undefined;
 
@@ -1466,61 +1526,6 @@ async function launch() {
     },
     true,
   );
-
-  // In translated ("chinese") mode: hover shows original text tooltip, Alt+Click (or click on non-interactive text) toggles original/translation (Prompt item 13).
-  let hoveredUnit: Unit | undefined;
-  document.addEventListener("pointermove", (e) => {
-    if (!active || mode !== "chinese") {
-      if (hoveredUnit) {
-        hoveredUnit = undefined;
-        overlay.hidePeek();
-      }
-      return;
-    }
-    const u = findTranslatedUnitAt(e.target);
-    if (!u || u.showingOriginal) {
-      if (hoveredUnit) {
-        hoveredUnit = undefined;
-        overlay.hidePeek();
-      }
-      return;
-    }
-    hoveredUnit = u;
-    const origText = u.parts
-      .map((p) => p.original)
-      .join("")
-      .trim();
-    if (origText) overlay.showPeek(origText, e.clientX, e.clientY);
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!active || mode !== "chinese" || e.button !== 0) return;
-    const target = e.target as Element | null;
-    if (!target) return;
-    // Do not hijack links, buttons, inputs, or active text selections
-    if (
-      !e.altKey &&
-      (target.closest(
-        "a,button,input,select,textarea,summary,[role='button']",
-      ) ||
-        (window.getSelection()?.toString().length || 0) > 0)
-    ) {
-      return;
-    }
-    const u = findTranslatedUnitAt(target);
-    if (!u || !u.translation) return;
-    if (!u.showingOriginal) {
-      for (const p of u.parts) {
-        p.node.data = p.original;
-        p.current = p.original;
-      }
-      u.showingOriginal = true;
-      overlay.hidePeek();
-    } else {
-      u.showingOriginal = false;
-      renderUnit(u, u.translation, u.version, trace || newTrace());
-    }
-  });
 
   function openInlineRevisionForLastTarget() {
     const unit = lastContextUnit;

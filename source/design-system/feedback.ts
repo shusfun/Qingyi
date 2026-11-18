@@ -429,8 +429,11 @@ export function toast(
 
 export function applyTheme(theme?: string | null) {
   if (typeof document === "undefined") return;
-  document.documentElement.dataset.theme =
-    theme === "light" || theme === "dark" ? theme : "system";
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
 }
 
 // Monotonic sequence + AbortController gate so stale async responses never overwrite newer state.

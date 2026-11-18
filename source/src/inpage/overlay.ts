@@ -48,6 +48,7 @@ export function createInPageOverlay(
   let position = initial.position;
   let closedForSession = false;
   let forceVisible = false;
+  let progressActivated = false;
   let boxWidth = 301;
   let boxHeight = 85;
   let rafId = 0;
@@ -87,7 +88,6 @@ export function createInPageOverlay(
       </div>
     </section>
     <section class="popover" hidden role="dialog"></section>
-    <div class="peek-tip" hidden></div>
     <div class="area-banner" hidden></div>
     <div class="area-rect" hidden></div>
   `;
@@ -101,7 +101,6 @@ export function createInPageOverlay(
   const trackEl = shadow.querySelector(".track") as HTMLElement;
   const fillEl = shadow.querySelector(".fill") as HTMLElement;
   const popoverEl = shadow.querySelector(".popover") as HTMLElement;
-  const peekEl = shadow.querySelector(".peek-tip") as HTMLElement;
   const areaBannerEl = shadow.querySelector(".area-banner") as HTMLElement;
   const areaRectEl = shadow.querySelector(".area-rect") as HTMLElement;
 
@@ -172,20 +171,34 @@ export function createInPageOverlay(
     box.style.top = `${top - offsetTop}px`;
   }
 
+  function maybeUnmountIfIdle() {
+    if (
+      box.hidden &&
+      popoverEl.hidden &&
+      areaBannerEl.hidden &&
+      host.isConnected
+    ) {
+      host.remove();
+    }
+  }
+
   function updateVisibility() {
     if (!initial.isTopFrame) {
       box.hidden = true;
       return;
     }
-    ensureMounted();
     const shouldHide =
-      !forceVisible && (closedForSession || progressVisible === false);
+      !progressActivated ||
+      (!forceVisible && (closedForSession || progressVisible === false));
     box.hidden = shouldHide;
     if (!shouldHide) {
+      ensureMounted();
       const rect = box.getBoundingClientRect();
       if (rect.width > 0) boxWidth = rect.width;
       if (rect.height > 0) boxHeight = rect.height;
       clampPositionToViewport();
+    } else {
+      maybeUnmountIfIdle();
     }
   }
 
@@ -193,6 +206,7 @@ export function createInPageOverlay(
     closedForSession = true;
     forceVisible = false;
     box.hidden = true;
+    maybeUnmountIfIdle();
   });
 
   let suppressClick = false;
@@ -311,11 +325,19 @@ export function createInPageOverlay(
   }
 
   function scheduleProgress(snapshot: ProgressSnapshot) {
+    progressActivated = true;
     pendingSnapshot = snapshot;
     if (!initial.isTopFrame) return;
     if (!rafId) {
       rafId = requestAnimationFrame(flushProgressRender);
     }
+  }
+
+  function hideProgress() {
+    progressActivated = false;
+    forceVisible = false;
+    box.hidden = true;
+    maybeUnmountIfIdle();
   }
 
   // --- Selection Translation & Inline Revision Popover ---
@@ -338,15 +360,21 @@ export function createInPageOverlay(
   function closePopover() {
     popoverEl.hidden = true;
     popoverEl.replaceChildren();
+    maybeUnmountIfIdle();
   }
 
   function showSelectionPopover(params: {
     rect: DOMRect;
     source: string;
+    hasLineBreaks?: boolean;
+    preserveLineBreaks?: boolean;
+    canSaveRevision?: boolean;
     loading?: boolean;
     translation?: string;
     channel?: "local" | "cloud" | "cache";
     error?: string;
+    onTogglePreserveLines?: (next: boolean) => void;
+    onRetranslateSource?: (editedSource: string) => void;
   }) {
     const isEn = en();
     popoverEl.replaceChildren();
@@ -356,7 +384,7 @@ export function createInPageOverlay(
     const titleWrap = document.createElement("div");
     titleWrap.className = "popover-title";
     const titleText = document.createElement("span");
-    titleText.textContent = isEn ? "Selection Translation" : "划词翻译";
+    titleText.textContent = isEn ? "Selection" : "划词翻译";
     titleWrap.append(titleText);
 
     if (params.channel) {
@@ -365,16 +393,39 @@ export function createInPageOverlay(
       pill.textContent =
         params.channel === "local"
           ? isEn
-            ? "Local model"
-            : "本地模型"
+            ? "Local"
+            : "本地"
           : params.channel === "cache"
             ? isEn
-              ? "Cache / Dict"
-              : "缓存 / 词库"
+              ? "Cache"
+              : "缓存"
             : isEn
-              ? "Cloud API"
-              : "云端服务";
+              ? "Cloud"
+              : "云端";
       titleWrap.append(pill);
+    }
+
+    if (params.hasLineBreaks && params.onTogglePreserveLines) {
+      const modeBtn = document.createElement("button");
+      modeBtn.type = "button";
+      modeBtn.className = "mode-toggle";
+      const lineByLine = !!params.preserveLineBreaks;
+      modeBtn.textContent = lineByLine
+        ? isEn
+          ? "Line-by-line"
+          : "按原换行"
+        : isEn
+          ? "Smart merge"
+          : "合并段落";
+      modeBtn.title = lineByLine
+        ? isEn
+          ? "Click to reconstruct paragraphs"
+          : "点击切换为智能合并段落"
+        : isEn
+          ? "Click to translate line-by-line"
+          : "点击切换为按原换行逐行翻译";
+      modeBtn.onclick = () => params.onTogglePreserveLines!(!lineByLine);
+      titleWrap.append(modeBtn);
     }
 
     const close = document.createElement("button");
@@ -398,44 +449,87 @@ export function createInPageOverlay(
     }
     popoverEl.append(body);
 
-    if (!params.loading && params.translation && !params.error) {
+    if (!params.loading) {
       const actions = document.createElement("div");
       actions.className = "popover-actions";
       const statusMsg = document.createElement("div");
       statusMsg.className = "popover-status";
       statusMsg.hidden = true;
 
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.className = "btn primary";
-      copyBtn.textContent = isEn ? "Copy" : "复制译文";
-      copyBtn.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(params.translation!);
-          statusMsg.textContent = isEn
-            ? "Copied to clipboard."
-            : "已复制译文。";
-          statusMsg.hidden = false;
-        } catch {
-          statusMsg.textContent = isEn ? "Copy failed." : "复制失败。";
-          statusMsg.hidden = false;
-        }
-      };
+      if (params.translation && !params.error) {
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn primary";
+        copyBtn.textContent = isEn ? "Copy" : "复制译文";
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(params.translation!);
+            statusMsg.textContent = isEn ? "Copied." : "已复制译文。";
+            statusMsg.hidden = false;
+          } catch {
+            statusMsg.textContent = isEn ? "Copy failed." : "复制失败。";
+            statusMsg.hidden = false;
+          }
+        };
+        actions.append(copyBtn);
+      }
 
-      const reviseBtn = document.createElement("button");
-      reviseBtn.type = "button";
-      reviseBtn.className = "btn";
-      reviseBtn.textContent = isEn ? "Save as revision" : "存为修订";
-      reviseBtn.onclick = () => {
-        showRevisionEditor({
-          rect: params.rect,
-          source: params.source,
-          initialTranslation: params.translation!,
-        });
-      };
+      let editorWrap: HTMLDivElement | null = null;
+      if (params.onRetranslateSource) {
+        const editSrcBtn = document.createElement("button");
+        editSrcBtn.type = "button";
+        editSrcBtn.className = "btn";
+        editSrcBtn.textContent = isEn ? "Source" : "原文";
+        editorWrap = document.createElement("div");
+        editorWrap.className = "popover-editor-wrap";
+        editorWrap.hidden = true;
 
-      actions.append(copyBtn, reviseBtn);
-      popoverEl.append(actions, statusMsg);
+        const srcArea = document.createElement("textarea");
+        srcArea.rows = 3;
+        srcArea.value = params.source;
+
+        const reBtn = document.createElement("button");
+        reBtn.type = "button";
+        reBtn.className = "btn primary";
+        reBtn.textContent = isEn ? "Re-translate" : "重新翻译";
+        reBtn.onclick = () => {
+          const val = srcArea.value.trim();
+          if (val) params.onRetranslateSource!(val);
+        };
+        editorWrap.append(srcArea, reBtn);
+
+        editSrcBtn.onclick = () => {
+          editorWrap!.hidden = !editorWrap!.hidden;
+          if (!editorWrap!.hidden) srcArea.focus();
+        };
+        actions.append(editSrcBtn);
+      }
+
+      if (
+        params.translation &&
+        !params.error &&
+        params.canSaveRevision !== false
+      ) {
+        const reviseBtn = document.createElement("button");
+        reviseBtn.type = "button";
+        reviseBtn.className = "btn";
+        reviseBtn.textContent = isEn ? "Save revision" : "存为修订";
+        reviseBtn.onclick = () => {
+          showRevisionEditor({
+            rect: params.rect,
+            source: params.source,
+            initialTranslation: params.translation!,
+          });
+        };
+        actions.append(reviseBtn);
+      }
+
+      if (actions.childElementCount > 0) {
+        popoverEl.append(actions, statusMsg);
+      }
+      if (editorWrap) {
+        popoverEl.append(editorWrap);
+      }
     }
 
     positionPopoverNear(params.rect);
@@ -516,22 +610,6 @@ export function createInPageOverlay(
     editor.focus();
   }
 
-  // --- Hover Original Peek Tooltip ---
-  function showPeek(text: string, x: number, y: number) {
-    ensureMounted();
-    peekEl.textContent = text;
-    peekEl.hidden = false;
-    const r = peekEl.getBoundingClientRect();
-    const w = r.width || 240;
-    const h = r.height || 40;
-    peekEl.style.left = `${Math.max(11, Math.min(innerWidth - w - 11, x + 11))}px`;
-    peekEl.style.top = `${Math.max(11, Math.min(innerHeight - h - 11, y + 15))}px`;
-  }
-
-  function hidePeek() {
-    peekEl.hidden = true;
-  }
-
   // --- Area Selection Mode ("框选区域翻译") ---
   let areaModeActive = false;
   let areaStart: { x: number; y: number } | null = null;
@@ -546,6 +624,7 @@ export function createInPageOverlay(
     window.removeEventListener("pointerdown", onAreaDown, true);
     window.removeEventListener("pointermove", onAreaMove, true);
     window.removeEventListener("pointerup", onAreaUp, true);
+    maybeUnmountIfIdle();
   }
 
   function onAreaDown(e: PointerEvent) {
@@ -676,17 +755,17 @@ export function createInPageOverlay(
       updateVisibility();
     },
     showProgressExplicitly() {
+      progressActivated = true;
       closedForSession = false;
       forceVisible = true;
       updateVisibility();
       if (pendingSnapshot) flushProgressRender();
     },
+    hideProgress,
     scheduleProgress,
     showSelectionPopover,
     showRevisionEditor,
     closePopover,
-    showPeek,
-    hidePeek,
     startAreaSelection,
     getLang: () => lang,
   };

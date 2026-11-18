@@ -151,9 +151,8 @@ export async function grantOriginsOnce(
   const origins = [...patterns];
   if (!origins.length) return;
 
-  const already = await chrome.permissions.contains({ origins });
-  if (already) return;
-
+  // Call chrome.permissions.request synchronously in the first turn of the user click handler
+  // without a preceding async contains() check, so Chromium's transient user activation is never lost.
   void recordTrace(trace, "permission.start", { outcome: "started" });
   const granted = await chrome.permissions.request({ origins });
   void recordTrace(trace, "permission.end", {

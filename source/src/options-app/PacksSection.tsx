@@ -4,10 +4,12 @@ import {
   Button,
   DataList,
   FeedbackBanner,
+  MetricGrid,
   Switch,
+  SettingGroup,
+  FilePickerButton,
   TextInput,
   Textarea,
-  VerdictHero,
   confirmAction,
   feedbackStore,
   resolveError,
@@ -43,7 +45,7 @@ export function PacksSection({
 }) {
   const store = useFeedbackStore();
   const en = lang === "en";
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const importAbortRef = useRef<AbortController | null>(null);
   const importTraceRef = useRef(newTrace());
   const [importing, setImporting] = useState(false);
@@ -265,15 +267,12 @@ export function PacksSection({
 
   const handleImportLocalFile = () =>
     executeImport("pack-import-local", async (signal, t) => {
-      const file = fileInputRef.current?.files?.[0];
       if (!file) {
         throw new Error("请选择词库文件");
       }
       const isGzip = /\.gz$/i.test(file.name);
       await importPackStream(file.stream(), isGzip, signal, t);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      setFile(null);
     });
 
   const handleImportRemoteUrl = () =>
@@ -387,30 +386,10 @@ export function PacksSection({
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "DICTIONARIES & REVISIONS" : "词库、修订与本地同步"}
-        title={
-          (cacheStatus?.packs.length || 0) > 0 ||
-          (cacheStatus?.revisions || 0) > 0
-            ? en
-              ? `${cacheStatus?.packs.length || 0} dictionary pack(s) · ${cacheStatus?.revisions ?? 0} user revision(s)`
-              : `已安装 ${cacheStatus?.packs.length || 0} 个离线词库 · ${cacheStatus?.revisions ?? 0} 条用户修订优先命中`
-            : en
-              ? "Import offline dictionary packs or save custom revisions"
-              : "导入压缩词库或保存人工修订，命中时无需请求模型"
-        }
-        badge={
-          <Badge tone="neutral">
-            {config.syncDictionary
-              ? en
-                ? "Sync to mistral-gui ON"
-                : "已开启同步至 mistral-gui"
-              : en
-                ? "Browser Local"
-                : "浏览器本地存储"}
-          </Badge>
-        }
-        metrics={[
+      <FeedbackBanner scope="packs" lang={lang} />
+
+      <MetricGrid
+        items={[
           {
             label: en ? "Active Packs" : "已启用词库",
             value: String(
@@ -418,45 +397,56 @@ export function PacksSection({
             ),
           },
           {
-            label: en ? "Revisions" : "人工修订",
+            label: en ? "User Revisions" : "人工修订条数",
             value:
               cacheStatus?.revisions == null
                 ? en
-                  ? "Unknown"
-                  : "未知"
+                  ? "—"
+                  : "—"
                 : String(cacheStatus.revisions),
           },
           {
-            label: en ? "Last Sync" : "最近同步",
+            label: en ? "Desktop Sync" : "桌面同步",
+            value: (
+              <Badge tone={config.syncDictionary ? "success" : "neutral"}>
+                {config.syncDictionary
+                  ? en
+                    ? "Enabled"
+                    : "已开启"
+                  : en
+                    ? "Local only"
+                    : "未开启"}
+              </Badge>
+            ),
+          },
+          {
+            label: en ? "Last Synced" : "最近同步",
             value: syncStatus?.syncedAt
               ? new Date(syncStatus.syncedAt).toLocaleTimeString()
-              : en
-                ? "Never"
-                : "尚未同步",
+              : "—",
           },
         ]}
       />
 
-      <FeedbackBanner scope="packs" lang={lang} />
-
-      <fieldset>
-        <legend>
-          {en ? "Import Dictionary Pack" : "导入离线词库包（qingyi-pack-v1）"}
-        </legend>
+      <SettingGroup
+        padded
+        title={
+          en ? "Import Dictionary Pack" : "导入离线词库包（qingyi-pack-v1）"
+        }
+      >
         <div class="grid">
-          <div class="field">
-            <span>
-              {en
+          <FilePickerButton
+            label={
+              en
                 ? "Local .jsonl / .gz pack file"
-                : "选择本地词库文件（支持 .jsonl / .gz）"}
-            </span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".jsonl,.gz,.ndjson,application/gzip"
-              disabled={importing}
-            />
-          </div>
+                : "选择本地词库文件（支持 .jsonl / .gz）"
+            }
+            file={file}
+            onSelect={setFile}
+            en={en}
+            accept=".jsonl,.gz,.ndjson,application/gzip"
+            disabled={importing}
+          />
           <TextInput
             label={en ? "Remote HTTPS pack URL" : "远程 HTTPS 词库地址"}
             type="url"
@@ -640,12 +630,12 @@ export function PacksSection({
             );
           }}
         />
-      </fieldset>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>
-          {en ? "User Revisions & History" : "用户人工修订与版本历史"}
-        </legend>
+      <SettingGroup
+        padded
+        title={en ? "User Revisions & History" : "用户人工修订与版本历史"}
+      >
         <FeedbackBanner scope="revisions" lang={lang} />
 
         <div class="grid">
@@ -845,14 +835,16 @@ export function PacksSection({
             )}
           />
         ) : null}
-      </fieldset>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>
-          {en
+      <SettingGroup
+        padded
+        title={
+          en
             ? "One-Way Sync to mistral-gui (Desktop Translation)"
-            : "单向同步至 mistral-gui（供桌面端粘贴与截图翻译复用）"}
-        </legend>
+            : "单向同步至 mistral-gui（供桌面端粘贴与截图翻译复用）"
+        }
+      >
         <FeedbackBanner scope="sync" lang={lang} />
         <Switch
           checked={Boolean(config.syncDictionary)}
@@ -959,7 +951,7 @@ export function PacksSection({
             {en ? "Clear synced copy in manager" : "清空管理器中的同步副本"}
           </Button>
         </div>
-      </fieldset>
+      </SettingGroup>
     </section>
   );
 }

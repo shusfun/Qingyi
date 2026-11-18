@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <title>轻译 Qingyi</title>
+  <defs>
+    <linearGradient id="qy-bg" x1="64" y1="36" x2="448" y2="476" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FA5246"/>
+      <stop offset="52%" stop-color="#E12524"/>
+      <stop offset="100%" stop-color="#B9181D"/>
+    </linearGradient>
+    <radialGradient id="qy-glow" cx="240" cy="120" r="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFD1C9" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FFD1C9" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="qy-glyph" x1="153" y1="208" x2="277" y2="334" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EF322B"/>
+      <stop offset="100%" stop-color="#C61A20"/>
+    </linearGradient>
+  </defs>
+
+  <path
+    fill="url(#qy-bg)"
+    d="M 256 28 C 392 28 484 28 484 256 C 484 484 392 484 256 484 C 120 484 28 484 28 256 C 28 28 120 28 256 28 Z"
+  />
+  <path
+    fill="url(#qy-glow)"
+    d="M 256 28 C 392 28 484 28 484 256 C 484 484 392 484 256 484 C 120 484 28 484 28 256 C 28 28 120 28 256 28 Z"
+  />
+  <path
+    stroke="#FFFFFF"
+    stroke-opacity="0.26"
+    stroke-width="3"
+    d="M 256 29.5 C 390 29.5 482.5 29.5 482.5 256 C 482.5 482.5 390 482.5 256 482.5 C 122 482.5 29.5 482.5 29.5 256 C 29.5 29.5 122 29.5 256 29.5 Z"
+  />
+
+  <!-- Translucent source card (top-right) + unobstructed 'A' cue -->
+  <rect x="198" y="98" width="216" height="186" rx="44" fill="#FFFFFF" fill-opacity="0.31"/>
+  <g stroke="#FFFFFF" stroke-opacity="0.82" stroke-width="13.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 350 196 L 371 138 L 392 196"/>
+    <line x1="356" y1="180" x2="386" y2="180"/>
+  </g>
+
+  <!-- Pure white translated speech card (bottom-left) -->
+  <path
+    fill="#FFFFFF"
+    d="M 144 172 L 286 172 C 311.4 172 332 192.6 332 218 L 332 322 C 332 347.4 311.4 368 286 368 L 196 368 L 143 399 C 136.5 402.8 129.5 397.2 132.4 390.2 L 141.5 367.8 C 117 366.5 98 346.5 98 322 L 98 218 C 98 192.6 118.6 172 144 172 Z"
+  />
+
+  <!-- Crisp modern geometric '文' mark inside front card -->
+  <g stroke="url(#qy-glyph)" stroke-width="22.4" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="215" y1="208" x2="215" y2="231"/>
+    <line x1="153" y1="237" x2="277" y2="237"/>
+    <path d="M 247 239 C 237 281 205 314 159 332"/>
+    <path d="M 179 256 C 201 288 233 315 271 332"/>
+  </g>
+</svg>

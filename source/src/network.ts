@@ -411,6 +411,7 @@ export async function request(
         completionTokens:
           parsed.usage?.completionTokens ?? Math.ceil(text.length / 3.5),
         chars,
+        estimated: !parsed.usage,
       });
       record(t, "http.attempt.end", {
         outcome: "success",
@@ -469,6 +470,7 @@ export async function request(
             partialUsage?.completionTokens ??
             Math.ceil(partialText.length / 3.5),
           chars,
+          estimated: !partialUsage,
         });
       }
 
@@ -585,8 +587,58 @@ export async function translateBatchDetailed(
   }
 
   // Long single-segment split with optional per-chunk cache reuse (Q-T11).
+  const isSingleProfile = singleTextModel(c.modelProfile || c.model);
+
+  const translateTaggedPiecewise = async (
+    seg: string,
+    parentTrace: Trace,
+  ): Promise<string | undefined> => {
+    if (!/__QY\d+__/.test(seg)) return undefined;
+    const matches = [...seg.matchAll(/__QY\d+__/g)];
+    if (!matches.length) return undefined;
+
+    record(childTrace(parentTrace), "batch.fallback", {
+      outcome: "fallback",
+      reason: "tagged-span-split",
+      items: matches.length,
+    });
+
+    let out = seg.slice(0, matches[0].index!);
+    for (let i = 0; i < matches.length; i++) {
+      if (signal.aborted) throw Error("CANCELLED");
+      const token = matches[i][0];
+      const spanStart = matches[i].index! + token.length;
+      const spanEnd =
+        i + 1 < matches.length ? matches[i + 1].index! : seg.length;
+      const rawSpan = seg.slice(spanStart, spanEnd);
+      const core = rawSpan.trim();
+      if (
+        !core ||
+        !/[a-z\u00c0-\u024f\u0370-\u052f\u0600-\u06ff\u3040-\u30ff\uac00-\ud7af\u3400-\u9fff]/i.test(
+          core,
+        )
+      ) {
+        out += token + rawSpan;
+        continue;
+      }
+      const leadWs = rawSpan.match(/^\s*/)?.[0] || "";
+      const trailWs = rawSpan.match(/\s*$/)?.[0] || "";
+      const pieceVal = await request(
+        c,
+        [core],
+        childTrace(parentTrace),
+        signal,
+        onAttempt,
+        options.extraHeaders,
+      );
+      if (!validTranslation(core, pieceVal)) return undefined;
+      out += token + leadWs + pieceVal.trim() + trailWs;
+    }
+    return validTranslation(seg, out) ? out : undefined;
+  };
+
   if (
-    singleTextModel(c.modelProfile || c.model) &&
+    isSingleProfile &&
     sources.length === 1 &&
     sources[0].length > SPLIT_LIMIT
   ) {
@@ -612,7 +664,7 @@ export async function translateBatchDetailed(
           chars: part.length,
         });
         try {
-          const value = await request(
+          let value = await request(
             c,
             [part],
             span,
@@ -620,6 +672,10 @@ export async function translateBatchDetailed(
             onAttempt,
             options.extraHeaders,
           );
+          if (!validTranslation(part, value) && /__QY\d+__/.test(part)) {
+            const recovered = await translateTaggedPiecewise(part, span);
+            if (recovered !== undefined) value = recovered;
+          }
           requireValue(validTranslation(part, value), "INVALID_TRANSLATION");
           await options.chunkCache?.set(part, value);
           values.push(value + (part.match(/\s+$/)?.[0] || ""));
@@ -771,10 +827,29 @@ export async function translateBatchDetailed(
       return;
     }
 
+    let singleResolved: string | undefined;
+    if (subSources.length === 1) {
+      if (validTranslation(subSources[0], text)) {
+        singleResolved = text;
+      } else if (isSingleProfile && /__QY\d+__/.test(subSources[0])) {
+        try {
+          singleResolved = await translateTaggedPiecewise(subSources[0], t);
+        } catch (pieceErr) {
+          const r =
+            pieceErr instanceof Error ? pieceErr.message : "TRANSLATION_FAILED";
+          if (
+            signal.aborted ||
+            r === "CANCELLED" ||
+            r.startsWith("LOCAL_RUNTIME_")
+          ) {
+            throw pieceErr;
+          }
+        }
+      }
+    }
+
     const parsed =
-      subSources.length === 1
-        ? [validTranslation(subSources[0], text) ? text : undefined]
-        : parseBatch(text, subSources);
+      subSources.length === 1 ? [singleResolved] : parseBatch(text, subSources);
 
     const missingLocal: number[] = [];
     parsed.forEach((val, idx) => {

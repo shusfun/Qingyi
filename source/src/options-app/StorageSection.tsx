@@ -3,9 +3,13 @@ import {
   Badge,
   Button,
   FeedbackBanner,
+  IconRefresh,
+  IconTrash,
+  MetricGrid,
+  SettingGroup,
+  SettingRow,
   StateBlock,
-  TextInput,
-  VerdictHero,
+  NumberStepper,
   confirmAction,
   feedbackStore,
   formatBytes,
@@ -285,40 +289,10 @@ export function StorageSection({
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "SQLITE / OPFS STORAGE" : "本地缓存状态"}
-        title={
-          cacheError
-            ? en
-              ? "Cache initialization encountered an error"
-              : "本地缓存读取未就绪（已有磁盘数据保留）"
-            : cacheStatus?.writeError
-              ? en
-                ? "Automatic writeback paused · Action required"
-                : "自动写回已暂停 · 请释放空间后点击「提交待写缓存」重试"
-              : en
-                ? "SQLite / OPFS connected · Zero-write on cache hit"
-                : "SQLite / OPFS 运行正常 · 缓存命中不产生磁盘写入"
-        }
-        tone={cacheError || cacheStatus?.writeError ? "error" : "success"}
-        badge={
-          <Badge
-            tone={cacheError || cacheStatus?.writeError ? "error" : "success"}
-          >
-            {cacheError
-              ? en
-                ? "Unavailable"
-                : "未就绪"
-              : cacheStatus?.writeError
-                ? en
-                  ? "Paused"
-                  : "需要处理"
-                : en
-                  ? "Healthy"
-                  : "就绪"}
-          </Badge>
-        }
-        metrics={[
+      <FeedbackBanner scope="storage" lang={lang} />
+
+      <MetricGrid
+        items={[
           {
             label: en ? "Database Size" : "数据库占用",
             value: cacheStatus
@@ -326,7 +300,7 @@ export function StorageSection({
               : formatUnknown(null, lang),
           },
           {
-            label: en ? "Pending Buffer" : "内存待写入",
+            label: en ? "Pending Buffer" : "待落盘缓冲",
             value:
               cacheStatus?.pending == null
                 ? formatUnknown(null, lang)
@@ -335,13 +309,33 @@ export function StorageSection({
                   : `${cacheStatus.pending} 条（${formatBytes(cacheStatus.pendingBytes, lang)}）`,
           },
           {
-            label: en ? "Total Budget" : "缓存总预算",
+            label: en ? "Total Budget" : "空间预算上限",
             value: formatBytes(config.budgetBytes, lang),
+          },
+          {
+            label: en ? "Status" : "引擎状态",
+            value: (
+              <Badge
+                tone={
+                  cacheError || cacheStatus?.writeError ? "error" : "success"
+                }
+              >
+                {cacheError
+                  ? en
+                    ? "Unavailable"
+                    : "未就绪"
+                  : cacheStatus?.writeError
+                    ? en
+                      ? "Paused"
+                      : "写回暂停"
+                    : en
+                      ? "Healthy"
+                      : "运行正常"}
+              </Badge>
+            ),
           },
         ]}
       />
-
-      <FeedbackBanner scope="storage" lang={lang} />
 
       {cacheError ? (
         <StateBlock
@@ -350,7 +344,7 @@ export function StorageSection({
           message={
             en
               ? "Existing data on disk is untouched. Click Retry to reconnect."
-              : "已有缓存与词库数据保持安全。请点击重试重新连接存储工作线程。"
+              : "已有缓存与词库数据保持安全，点击重试重新连接。"
           }
           detail={cacheError}
           onRetry={handleRefresh}
@@ -364,176 +358,156 @@ export function StorageSection({
           title={en ? "Writeback paused" : "自动写回已暂停"}
           message={
             en
-              ? `Reason: ${cacheStatus.writeError}. Free up space or adjust budget, then click "Commit Pending Cache" below.`
-              : `原因：${cacheStatus.writeError}。腾出空间或调高预算后，点击下方「提交待写缓存」按钮即可恢复。`
+              ? `Reason: ${cacheStatus.writeError}. Free up space or adjust budget, then click Commit Pending Cache.`
+              : `原因：${cacheStatus.writeError}。腾出空间或调高预算后，点击下方「提交待写缓存」恢复。`
           }
           lang={lang}
         />
       ) : null}
 
-      <fieldset>
-        <legend>{en ? "Cache Budget" : "空间预算设置"}</legend>
-        <div class="grid">
-          <TextInput
-            label={en ? "Total cache budget (GiB)" : "本地缓存总预算（GiB）"}
-            type="number"
-            min={0.25}
-            max={64}
-            step={0.25}
-            value={budgetDraftGiB}
-            error={budgetError}
-            hint={
-              en
-                ? "Minimum 0.0625 GiB (64 MiB), step 0.25 GiB. When full, oldest cloud cache blocks evict automatically (FIFO) while dictionaries and user revisions stay untouched."
-                : "范围 0.0625–64 GiB（步进 0.25 GiB）。预算满时按写入顺序（FIFO）自动淘汰旧云端缓存，词库与用户修订永久保留；本地模型结果独立在 256 MiB 上限内按 FIFO 轮转，以遵守命中零写入约定。"
-            }
-            onValueInput={(v) => {
-              setBudgetError("");
-              setBudgetDraftGiB(v);
-            }}
-          />
-        </div>
-        <div class="actions">
+      <SettingGroup title={en ? "Storage Budget" : "空间预算"}>
+        <SettingRow
+          title={en ? "Total cache budget (GiB)" : "本地缓存总预算（GiB）"}
+          description={
+            en
+              ? "0.0625–64 GiB. Evicts oldest cloud blocks (FIFO) when full; dictionaries and revisions are never evicted."
+              : "范围 0.0625–64 GiB。满额时自动按写入顺序淘汰旧云端缓存，词库与人工修订永久保留。"
+          }
+          error={budgetError}
+        >
+          <div style={{ width: "155px", maxWidth: "100%" }}>
+            <NumberStepper
+              en={en}
+              name={en ? "Cache budget" : "缓存预算"}
+              unit="GiB"
+              min={0.0625}
+              max={64}
+              step={0.0625}
+              value={budgetDraftGiB}
+              onValueInput={(v) => {
+                setBudgetError("");
+                setBudgetDraftGiB(v);
+              }}
+            />
+          </div>
           <Button
             variant="primary"
             busy={store.isBusy("storage:budget")}
             onClick={handleSaveBudget}
           >
-            {en ? "Save budget" : "保存预算"}
+            {en ? "Save" : "保存预算"}
           </Button>
-        </div>
-      </fieldset>
+        </SettingRow>
+      </SettingGroup>
 
       {cacheStatus ? (
-        <fieldset>
-          <legend>
-            {en ? "Detailed Storage Breakdown" : "存储明细与维护"}
-          </legend>
-          <div class="rows">
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>{en ? "Cloud model entries" : "云端模型缓存"}</strong>
-                <span class="hint">
-                  {en
-                    ? "Auto-evicts oldest blocks when budget reached"
-                    : "预算满时自动淘汰最旧块"}
-                </span>
-              </div>
-              <span>{formatNullableCount(cacheStatus.modelEntries, en)}</span>
-            </div>
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>
-                  {en
-                    ? "Local model entries (FIFO)"
-                    : "本地模型缓存（FIFO 淘汰）"}
-                </strong>
-                <span class="hint">
-                  {en
-                    ? "Capped at 256 MiB, isolated by model & deployment revision"
-                    : "独立上限 256 MiB，按模型与部署指纹隔离"}
-                </span>
-              </div>
-              <span>
-                {formatNullableCount(cacheStatus.localModelEntries, en)} ·{" "}
-                {formatBytes(cacheStatus.localModelBytes, lang)}
-              </span>
-            </div>
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>{en ? "User revisions" : "用户人工修订"}</strong>
-              </div>
-              <span>{formatNullableCount(cacheStatus.revisions, en)}</span>
-            </div>
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>
-                  {en
-                    ? "Compressed blocks / Raw payload"
-                    : "压缩块体积 / 原始文本"}
-                </strong>
-              </div>
-              <span>
-                {cacheStatus.blockBytes == null
-                  ? formatUnknown(null, lang)
-                  : formatBytes(cacheStatus.blockBytes, lang)}{" "}
-                /{" "}
-                {cacheStatus.rawBytes == null
-                  ? formatUnknown(null, lang)
-                  : formatBytes(cacheStatus.rawBytes, lang)}
-              </span>
-            </div>
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>
-                  {en
-                    ? "Reusable freelist / Hot memory"
-                    : "可复用空闲页 / 内存热缓存"}
-                </strong>
-              </div>
-              <span>
-                {formatBytes(cacheStatus.freeBytes, lang)} /{" "}
-                {formatBytes(cacheStatus.hotBytes, lang)}
-              </span>
-            </div>
-            <div class="list-row">
-              <div class="list-row-main">
-                <strong>
-                  {en
-                    ? "Worker logical writes (session)"
-                    : "本次 Worker 逻辑提交 / 维护提交"}
-                </strong>
-                <span class="hint">
-                  {en
-                    ? "Application bytes submitted, not physical SSD erase cycles"
-                    : "应用层提交字节数，不等于固态硬盘物理擦写量"}
-                </span>
-              </div>
-              <span>
-                {formatBytes(cacheStatus.metrics.submittedBytes, lang)} /{" "}
-                {formatBytes(cacheStatus.metrics.maintenanceBytes, lang)}
-              </span>
-            </div>
-          </div>
-
-          <div class="actions">
-            <Button
-              busy={store.isBusy("storage:refresh")}
-              onClick={handleRefresh}
-            >
-              {en ? "Refresh stats" : "刷新统计"}
-            </Button>
-            <Button busy={store.isBusy("storage:flush")} onClick={handleFlush}>
-              {en ? "Commit Pending Cache" : "提交待写缓存"}
-            </Button>
-            <Button
-              busy={store.isBusy("storage:purge-invalid")}
-              onClick={handlePurgeInvalid}
-            >
-              {en ? "Clean corrupt entries" : "清理异常占位符缓存"}
-            </Button>
-            <Button
-              busy={store.isBusy("storage:collect")}
-              disabled={maintenanceRunning}
-              onClick={handleCollect}
-            >
-              {en ? "Run block maintenance" : "整理空闲块"}
-            </Button>
-            <Button
-              disabled={!maintenanceRunning}
-              onClick={handleStopMaintenance}
-            >
-              {en ? "Stop maintenance" : "停止维护"}
-            </Button>
-            <Button
-              variant="danger"
-              busy={store.isBusy("storage:clear-models")}
-              onClick={() => void handleClearModels()}
-            >
-              {en ? "Clear model cache" : "清理模型缓存"}
-            </Button>
-          </div>
-        </fieldset>
+        <SettingGroup
+          title={en ? "Storage Breakdown & Maintenance" : "缓存明细与维护"}
+          actions={
+            <>
+              <Button
+                size="sm"
+                icon={<IconRefresh size={13} />}
+                busy={store.isBusy("storage:refresh")}
+                onClick={handleRefresh}
+              >
+                {en ? "Refresh" : "刷新"}
+              </Button>
+              <Button
+                size="sm"
+                busy={store.isBusy("storage:flush")}
+                onClick={handleFlush}
+              >
+                {en ? "Commit Pending" : "提交待写缓存"}
+              </Button>
+              <Button
+                size="sm"
+                busy={store.isBusy("storage:purge-invalid")}
+                onClick={handlePurgeInvalid}
+              >
+                {en ? "Clean Corrupt" : "清理坏占位符"}
+              </Button>
+              {maintenanceRunning ? (
+                <Button size="sm" onClick={handleStopMaintenance}>
+                  {en ? "Stop" : "停止维护"}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  busy={store.isBusy("storage:collect")}
+                  onClick={handleCollect}
+                >
+                  {en ? "Compact" : "整理空闲块"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<IconTrash size={13} />}
+                busy={store.isBusy("storage:clear-models")}
+                onClick={() => void handleClearModels()}
+              >
+                {en ? "Clear Cache" : "清空模型缓存"}
+              </Button>
+            </>
+          }
+        >
+          <SettingRow
+            title={en ? "Cloud model cache" : "云端模型缓存"}
+            description={en ? "FIFO block eviction" : "满额自动淘汰最旧块"}
+          >
+            <span>{formatNullableCount(cacheStatus.modelEntries, en)}</span>
+          </SettingRow>
+          <SettingRow
+            title={en ? "Local model cache" : "本地模型缓存"}
+            description={
+              en
+                ? "256 MiB cap, isolated by model revision"
+                : "独立 256 MiB 上限，按模型版本隔离"
+            }
+          >
+            <span>
+              {formatNullableCount(cacheStatus.localModelEntries, en)} ·{" "}
+              {formatBytes(cacheStatus.localModelBytes, lang)}
+            </span>
+          </SettingRow>
+          <SettingRow title={en ? "User revisions" : "人工修订条数"}>
+            <span>{formatNullableCount(cacheStatus.revisions, en)}</span>
+          </SettingRow>
+          <SettingRow
+            title={en ? "Compressed / Raw payload" : "压缩块体积 / 原始文本"}
+          >
+            <span>
+              {cacheStatus.blockBytes == null
+                ? formatUnknown(null, lang)
+                : formatBytes(cacheStatus.blockBytes, lang)}{" "}
+              /{" "}
+              {cacheStatus.rawBytes == null
+                ? formatUnknown(null, lang)
+                : formatBytes(cacheStatus.rawBytes, lang)}
+            </span>
+          </SettingRow>
+          <SettingRow
+            title={
+              en ? "Reusable freelist / Hot RAM" : "可复用空闲页 / 内存热缓存"
+            }
+          >
+            <span>
+              {formatBytes(cacheStatus.freeBytes, lang)} /{" "}
+              {formatBytes(cacheStatus.hotBytes, lang)}
+            </span>
+          </SettingRow>
+          <SettingRow
+            title={
+              en ? "Session logical writes" : "本次会话应用层写入 / 维护写入"
+            }
+          >
+            <span>
+              {formatBytes(cacheStatus.metrics.submittedBytes, lang)} /{" "}
+              {formatBytes(cacheStatus.metrics.maintenanceBytes, lang)}
+            </span>
+          </SettingRow>
+        </SettingGroup>
       ) : null}
     </section>
   );

@@ -5,8 +5,9 @@ import {
   DataList,
   Disclosure,
   FeedbackBanner,
+  MetricGrid,
+  SettingGroup,
   TextInput,
-  VerdictHero,
   confirmAction,
   formatBytes,
   formatDurationMs,
@@ -122,41 +123,25 @@ export function DiagnosticSection({ lang }: { lang: UiLang }) {
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "REDACTED DIAGNOSTICS" : "脱敏诊断与追踪"}
-        title={
-          en
-            ? `Page ${pageNumber} · ${events.length} event(s) shown (newest first)`
-            : `第 ${pageNumber} 页（最新优先）· 当前显示 ${events.length} 条记录`
-        }
-        description={
-          en
-            ? "Keys, tokens, source text, translations, and usage counts are never written to diagnostics."
-            : "密钥、Token、原文、译文与用量统计均不会写入诊断记录；W3C traceparent 可与 mistral-gui 日志跨进程关联。"
-        }
-        badge={
-          <Badge tone="neutral">
-            {hasMore
-              ? en
-                ? "More pages available"
-                : "可继续向后翻页"
-              : en
-                ? "End of history"
-                : "已到最早一页"}
-          </Badge>
-        }
-        metrics={[
+      <FeedbackBanner scope="diagnostic" lang={lang} />
+
+      <MetricGrid
+        items={[
+          {
+            label: en ? "Current Page" : "当前页码 / 条数",
+            value: en
+              ? `Page ${pageNumber} (${events.length})`
+              : `第 ${pageNumber} 页（${events.length} 条）`,
+          },
           {
             label: en ? "Buffered in RAM" : "内存待落盘",
             value:
               pageData?.stats.pending == null
                 ? "0"
-                : en
-                  ? `${pageData.stats.pending}`
-                  : `${pageData.stats.pending} 条`,
+                : `${pageData.stats.pending}`,
           },
           {
-            label: en ? "Flushes / Volume" : "诊断刷写 / 累计体积",
+            label: en ? "Flushes / Volume" : "刷写次数 / 体积",
             value: pageData
               ? `${pageData.stats.flushes} / ${formatBytes(pageData.stats.diagnosticSubmittedBytes ?? 0, lang)}`
               : "—",
@@ -168,10 +153,7 @@ export function DiagnosticSection({ lang }: { lang: UiLang }) {
         ]}
       />
 
-      <FeedbackBanner scope="diagnostic" lang={lang} />
-
-      <fieldset>
-        <legend>{en ? "Filter & Export" : "筛选与导出"}</legend>
+      <SettingGroup padded title={en ? "Filter & Export" : "筛选与导出"}>
         <div class="grid">
           <TextInput
             label={en ? "Trace ID (W3C 32-hex)" : "追踪编号（Trace ID）"}
@@ -309,7 +291,7 @@ export function DiagnosticSection({ lang }: { lang: UiLang }) {
             {en ? "Clear diagnostics" : "清除诊断"}
           </Button>
         </div>
-      </fieldset>
+      </SettingGroup>
 
       <DataList
         items={events}

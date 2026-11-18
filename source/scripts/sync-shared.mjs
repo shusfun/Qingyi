@@ -21,6 +21,7 @@ const designSystemFiles = [
   "components.css",
   "errors.ts",
   "feedback.ts",
+  "icons.tsx",
   "components.tsx",
   "index.ts",
 ];
@@ -58,6 +59,39 @@ const mappings = [
       "app",
       "rules",
       "translation-rules.json",
+    ),
+  },
+  {
+    from: path.join(sourceRoot, "shared", "paragraph-fixtures.json"),
+    to: path.join(
+      repoRoot,
+      "mistral-gui",
+      "web",
+      "src",
+      "shared",
+      "paragraph-fixtures.json",
+    ),
+  },
+  {
+    from: path.join(sourceRoot, "shared", "paragraph-fixtures.json"),
+    to: path.join(
+      repoRoot,
+      "mistral-gui",
+      "internal",
+      "app",
+      "rules",
+      "paragraph-fixtures.json",
+    ),
+  },
+  {
+    from: path.join(sourceRoot, "src", "paragraph-rebuild.ts"),
+    to: path.join(
+      repoRoot,
+      "mistral-gui",
+      "web",
+      "src",
+      "shared",
+      "paragraph-rebuild.ts",
     ),
   },
 ];

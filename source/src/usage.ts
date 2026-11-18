@@ -8,6 +8,8 @@ export interface UsageBucket {
   promptTokens: number;
   completionTokens: number;
   chars: number;
+  /** 服务未返回 usage、按字符数估算 token 的请求次数；旧数据没有该字段。 */
+  estimatedRequests?: number;
 }
 
 export interface DailyUsageRecord {
@@ -53,9 +55,7 @@ function withAggregates(
       (day.cloudCompletionTokens || 0) + (day.localCompletionTokens || 0);
     for (const [k, b] of Object.entries(day.byModel || {})) {
       if (k.startsWith("cloud:")) totalCloudRetries += b.retryRequests || 0;
-      if (b.chars > 0 && b.promptTokens > 0 && b.completionTokens === 0) {
-        estimatedCount += 1;
-      }
+      estimatedCount += b.estimatedRequests || 0;
     }
   }
 
@@ -146,6 +146,8 @@ export function recordUsageAttempt(params: {
   promptTokens: number;
   completionTokens: number;
   chars: number;
+  /** token 数是按字符估算的，而不是服务返回的 usage。 */
+  estimated?: boolean;
 }): void {
   if (typeof chrome === "undefined" || !chrome.storage?.local?.set) return;
   writeTail = writeTail
@@ -187,6 +189,9 @@ export function recordUsageAttempt(params: {
       bucket.promptTokens += params.promptTokens;
       bucket.completionTokens += params.completionTokens;
       bucket.chars += params.chars;
+      if (params.estimated) {
+        bucket.estimatedRequests = (bucket.estimatedRequests || 0) + 1;
+      }
       day.byModel[key] = bucket;
       store.days[date] = day;
 

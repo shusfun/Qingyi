@@ -166,6 +166,8 @@ export async function translateDeeplBatch(
       promptTokens: Math.ceil(chars / 3.5),
       completionTokens: Math.ceil(outChars / 3.5),
       chars,
+      // DeepL 按字符计费且不返回 token，这里的 token 只是估算值。
+      estimated: true,
     });
     recordedUsage = true;
     record(t, "http.attempt.end", {

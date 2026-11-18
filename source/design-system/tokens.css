@@ -1,22 +1,25 @@
-/* Palette -> semantics -> materials. Components consume only semantic and material tokens. */
+/* Modern Desktop Utility Design System: Palette -> Semantics -> Elevation & Motion */
 :root,
 :host {
-  --palette-canvas: #f3efe7;
-  --palette-sunken: #eae4d8;
-  --palette-panel: #faf7f0;
-  --palette-raised: #fffdf7;
-  --palette-ink: #302e29;
-  --palette-muted: #756e63;
-  --palette-line: #ddd5c7;
-  --palette-accent: #a94d31;
-  --palette-accent-soft: #f4e4d8;
-  --palette-on-accent: #fff9f0;
-  --palette-good: #327052;
-  --palette-bad: #b43e34;
-  --palette-warn: #916019;
-  --palette-info: #56606b;
+  --palette-canvas: #f6f7f9;
+  --palette-sidebar: #f0f2f5;
+  --palette-sunken: #eceef2;
+  --palette-panel: #ffffff;
+  --palette-raised: #ffffff;
+  --palette-ink: #111827;
+  --palette-muted: #6b7280;
+  --palette-line: rgba(15, 23, 42, 0.08);
+  --palette-line-strong: rgba(15, 23, 42, 0.15);
+  --palette-accent: #dc2626;
+  --palette-accent-soft: rgba(220, 38, 38, 0.08);
+  --palette-on-accent: #ffffff;
+  --palette-good: #16a34a;
+  --palette-bad: #dc2626;
+  --palette-warn: #d97706;
+  --palette-info: #2563eb;
 
   --color-bg: var(--palette-canvas);
+  --color-sidebar: var(--palette-sidebar);
   --color-sunken: var(--palette-sunken);
   --color-panel: var(--palette-panel);
   --color-raised: var(--palette-raised);
@@ -24,6 +27,7 @@
   --color-muted: var(--palette-muted);
   --color-unknown: var(--palette-muted);
   --color-border: var(--palette-line);
+  --color-border-strong: var(--palette-line-strong);
   --color-accent: var(--palette-accent);
   --color-accent-soft: var(--palette-accent-soft);
   --color-on-accent: var(--palette-on-accent);
@@ -33,112 +37,131 @@
   --color-info: var(--palette-info);
   --color-success-soft: color-mix(
     in srgb,
-    var(--color-success) 13%,
+    var(--color-success) 11%,
     var(--color-panel)
   );
   --color-danger-soft: color-mix(
     in srgb,
-    var(--color-danger) 13%,
+    var(--color-danger) 11%,
     var(--color-panel)
   );
   --color-warning-soft: color-mix(
     in srgb,
-    var(--color-warning) 15%,
+    var(--color-warning) 13%,
     var(--color-panel)
   );
   --color-info-soft: color-mix(
     in srgb,
-    var(--color-info) 13%,
+    var(--color-info) 11%,
     var(--color-panel)
   );
 
-  --material-shadow: 0 5px 19px
-    color-mix(in srgb, var(--color-text) 7%, transparent);
-  --material-shadow-strong: 0 11px 33px
-    color-mix(in srgb, var(--color-text) 15%, transparent);
-  --material-overlay: color-mix(in srgb, var(--color-text) 35%, transparent);
+  --ring: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm:
+    0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --material-shadow: var(--shadow-sm);
+  --material-shadow-strong:
+    0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.05);
+  --material-overlay: rgba(15, 23, 42, 0.44);
 
-  --space-1: 3px;
-  --space-2: 7px;
-  --space-3: 11px;
-  --space-4: 15px;
-  --space-5: 19px;
-  --space-6: 25px;
-  --space-7: 33px;
-  --space-8: 49px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
 
-  --font-xs: 11px;
+  --font-xs: 12px;
   --font-sm: 13px;
-  --font-md: 15px;
-  --font-lg: 19px;
-  --font-xl: 25px;
-  --font-display: 35px;
+  --font-md: 13.5px;
+  --font-lg: 15px;
+  --font-xl: 18px;
+  --font-display: 20px;
 
   --radius-sm: 7px;
-  --radius-md: 13px;
-  --radius-lg: 21px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
 
   --stroke: 1px;
   --stroke-strong: 3px;
-  --focus: 3px;
-  --control-height: 39px;
-  --sidebar-width: 231px;
-  --content-width: 1051px;
-  --field-width: 231px;
-  --progress-width: 301px;
-  --dialog-width: 493px;
-  --detail-height: 379px;
-  --titlebar-height: 47px;
-  --window-button-width: 47px;
-  --traffic-inset: 85px;
+  --focus: 2px;
+  --control-height: 32px;
+  --sidebar-width: 216px;
+  --content-width: 860px;
+  --field-width: 210px;
+  --progress-width: 288px;
+  --dialog-width: 440px;
+  --detail-height: 340px;
+  --titlebar-height: 38px;
+  --window-button-width: 46px;
+  --traffic-inset: 78px;
 
-  --motion-fast: 175ms;
-  --motion-normal: 235ms;
-  --weight-medium: 550;
-  --weight-bold: 650;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-fast: 150ms;
+  --motion-normal: 220ms;
+  --weight-medium: 500;
+  --weight-bold: 600;
   --font-body:
-    system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  --font-code: ui-monospace, Consolas, monospace;
-  --line-height: 1.65;
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
+  --font-code:
+    "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Consolas,
+    monospace;
+  --line-height: 1.5;
   color-scheme: light;
 }
 
 :root[data-theme="dark"],
 :host([data-theme="dark"]) {
-  --palette-canvas: #211f1c;
-  --palette-sunken: #1b1916;
-  --palette-panel: #292622;
-  --palette-raised: #33302a;
-  --palette-ink: #eee7db;
-  --palette-muted: #b8ae9e;
-  --palette-line: #494237;
-  --palette-accent: #e79570;
-  --palette-accent-soft: #473025;
-  --palette-on-accent: #271e18;
-  --palette-good: #91c6a3;
-  --palette-bad: #f09c91;
-  --palette-warn: #dfbd7f;
-  --palette-info: #9aa6b2;
+  --palette-canvas: #0d0f14;
+  --palette-sidebar: #11141b;
+  --palette-sunken: #161a23;
+  --palette-panel: #171b24;
+  --palette-raised: #1e2330;
+  --palette-ink: #f3f4f6;
+  --palette-muted: #9ca3af;
+  --palette-line: rgba(255, 255, 255, 0.075);
+  --palette-line-strong: rgba(255, 255, 255, 0.14);
+  --palette-accent: #f04438;
+  --palette-accent-soft: rgba(240, 68, 56, 0.14);
+  --palette-on-accent: #ffffff;
+  --palette-good: #4ade80;
+  --palette-bad: #f87171;
+  --palette-warn: #fbbf24;
+  --palette-info: #60a5fa;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.34);
+  --material-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --material-overlay: rgba(0, 0, 0, 0.62);
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]),
   :host(:not([data-theme="light"]):not([data-theme="dark"])) {
-    --palette-canvas: #211f1c;
-    --palette-sunken: #1b1916;
-    --palette-panel: #292622;
-    --palette-raised: #33302a;
-    --palette-ink: #eee7db;
-    --palette-muted: #b8ae9e;
-    --palette-line: #494237;
-    --palette-accent: #e79570;
-    --palette-accent-soft: #473025;
-    --palette-on-accent: #271e18;
-    --palette-good: #91c6a3;
-    --palette-bad: #f09c91;
-    --palette-warn: #dfbd7f;
-    --palette-info: #9aa6b2;
+    --palette-canvas: #0d0f14;
+    --palette-sidebar: #11141b;
+    --palette-sunken: #161a23;
+    --palette-panel: #171b24;
+    --palette-raised: #1e2330;
+    --palette-ink: #f3f4f6;
+    --palette-muted: #9ca3af;
+    --palette-line: rgba(255, 255, 255, 0.075);
+    --palette-line-strong: rgba(255, 255, 255, 0.14);
+    --palette-accent: #f04438;
+    --palette-accent-soft: rgba(240, 68, 56, 0.14);
+    --palette-on-accent: #ffffff;
+    --palette-good: #4ade80;
+    --palette-bad: #f87171;
+    --palette-warn: #fbbf24;
+    --palette-info: #60a5fa;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.34);
+    --material-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --material-overlay: rgba(0, 0, 0, 0.62);
     color-scheme: dark;
   }
 }

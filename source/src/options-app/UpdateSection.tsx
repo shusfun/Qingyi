@@ -3,9 +3,14 @@ import {
   Badge,
   Button,
   DataList,
+  Disclosure,
   FeedbackBanner,
+  IconDownload,
+  IconRefresh,
+  IconUpload,
+  SettingGroup,
+  SettingRow,
   TextInput,
-  VerdictHero,
   confirmAction,
   feedbackStore,
   formatBytes,
@@ -306,169 +311,156 @@ export function UpdateSection({
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "VERSION & PORTABILITY" : "版本检查、配置备份与迁移"}
-        title={
-          en
-            ? `Qingyi Extension v${manifestVersion}`
-            : `轻译扩展 v${manifestVersion}`
-        }
-        description={
-          en
-            ? `Current update repository: ${config.releaseRepo}`
-            : `当前更新发布源：${config.releaseRepo}`
-        }
-        badge={
+      <FeedbackBanner scope="update" lang={lang} />
+      <FeedbackBanner scope="update-repo" lang={lang} />
+      <FeedbackBanner scope="settings-io" lang={lang} />
+      <FeedbackBanner scope="migration" lang={lang} />
+
+      <SettingGroup title={en ? "Version & Updates" : "版本与更新"}>
+        <SettingRow
+          title={en ? "Current Version" : "当前扩展版本"}
+          description={`${config.releaseRepo}`}
+        >
           <Badge tone={release?.newer ? "info" : "neutral"}>
             {release?.newer
               ? en
-                ? `Update v${release.version}`
+                ? `New v${release.version}`
                 : `可升级 v${release.version}`
               : `v${manifestVersion}`}
           </Badge>
-        }
-      />
-
-      <fieldset>
-        <legend>{en ? "Check for Extension Updates" : "版本更新检查"}</legend>
-        <FeedbackBanner scope="update" lang={lang} />
-        <FeedbackBanner scope="update-repo" lang={lang} />
-
-        <div class="actions">
           <Button
             variant="primary"
+            size="sm"
+            icon={<IconRefresh size={13} />}
             busy={store.isBusy("update:check")}
             onClick={handleCheckRelease}
           >
-            {en ? "Check for updates" : "检查更新"}
+            {en ? "Check Updates" : "检查更新"}
           </Button>
-        </div>
+        </SettingRow>
 
-        {/* Q-36: Structured multi-line release card instead of \n inside <p>! */}
         {release ? (
-          <div class="card">
-            <div class="split-head">
-              <strong>
-                {en
-                  ? `Current v${release.current} · Latest ${release.tag}`
-                  : `当前版本 v${release.current} · 最新版本 ${release.tag}`}
-              </strong>
-              <Badge tone={release.newer ? "info" : "success"}>
-                {release.newer
-                  ? en
-                    ? "Update available"
-                    : "发现新版本"
-                  : en
-                    ? "Up to date"
-                    : "已是最新"}
-              </Badge>
-            </div>
-            <p class="hint">
-              {release.hasChecksum
+          <SettingRow
+            vertical
+            title={
+              en
+                ? `Latest Release: ${release.tag}`
+                : `最新发布版本：${release.tag}`
+            }
+            description={
+              release.hasChecksum
                 ? en
-                  ? "SHA-256 checksum asset verified."
-                  : "已附带 SHA-256 校验文件。"
-                : en
-                  ? "No SHA-256 checksum file attached."
-                  : "未检测到独立的 .sha256 校验文件。"}
-            </p>
+                  ? "SHA-256 checksum verified"
+                  : "已附带 SHA-256 校验摘要"
+                : undefined
+            }
+          >
             {release.notes ? (
-              <pre style={{ whiteSpace: "pre-wrap", marginTop: "9px" }}>
+              <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
                 {release.notes}
               </pre>
             ) : null}
-            <div class="actions">
+            <div class="actions" style={{ margin: 0 }}>
               {release.assets.map((asset) => (
                 <a
                   key={asset.name}
+                  class="button sm"
                   href={asset.url}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  {en
-                    ? `Download ${asset.name} (${formatBytes(asset.size, lang)})`
-                    : `下载 ${asset.name}（${formatBytes(asset.size, lang)}）`}
+                  {`${asset.name} (${formatBytes(asset.size, lang)})`}
                 </a>
               ))}
-              <a href={release.url} target="_blank" rel="noreferrer">
-                {en ? "View release page" : "查看发布页说明"}
+              <a
+                class="button ghost sm"
+                href={release.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {en ? "Release notes ↗" : "发布说明 ↗"}
               </a>
             </div>
-          </div>
+          </SettingRow>
         ) : null}
 
-        <TextInput
-          label={
-            en
-              ? "GitHub Release repository (owner/repo)"
-              : "更新仓库（owner/repo）"
-          }
-          value={releaseRepoDraft}
-          placeholder={DEFAULTS.releaseRepo}
-          onValueInput={(v) => setReleaseRepoDraft(v)}
-        />
-        <div class="actions">
+        <SettingRow
+          title={en ? "Release Repository" : "更新发布仓库"}
+          description={en ? "GitHub owner/repo" : "留空恢复官方仓库"}
+        >
+          <div style={{ width: "180px" }}>
+            <TextInput
+              value={releaseRepoDraft}
+              placeholder={DEFAULTS.releaseRepo}
+              onValueInput={(v) => setReleaseRepoDraft(v)}
+            />
+          </div>
           <Button
+            size="sm"
             busy={store.isBusy("update:repo-save")}
             onClick={() => void handleSaveRepo(false)}
           >
-            {en ? "Save repository" : "保存更新源"}
+            {en ? "Save" : "保存"}
           </Button>
           <Button
+            size="sm"
+            variant="ghost"
             busy={store.isBusy("update:repo-reset")}
             onClick={() => void handleSaveRepo(true)}
           >
-            {en ? "Restore official repository" : "恢复官方源"}
+            {en ? "Reset" : "恢复官方"}
           </Button>
-        </div>
-      </fieldset>
+        </SettingRow>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>
-          {en
-            ? "Settings Backup & Import (No Keys)"
-            : "配置导出与导入（不含密钥）"}
-        </legend>
-        <FeedbackBanner scope="settings-io" lang={lang} />
-        <p class="hint">
-          {en
-            ? "Export routing, model names, reading preferences, and site rules to JSON. API keys and local tokens are never exported."
-            : "导出调用策略、模型名称、阅读样式与全部网站规则为 JSON 文件；所有 API Key 与本地 Token 均不会导出。导入前会先展示变更差异预览。"}
-        </p>
-        <div class="actions">
-          <Button onClick={handleExportSettings}>
-            {en ? "Export settings JSON" : "导出当前配置 JSON"}
-          </Button>
-          <label
-            style={{ display: "inline-flex", alignItems: "center", margin: 0 }}
+      <SettingGroup title={en ? "Settings Backup" : "配置备份与导入"}>
+        <SettingRow
+          title={en ? "Export & Import JSON" : "导出或导入配置（不含密钥）"}
+          description={
+            en
+              ? "Includes routing, models, reading style, and per-site rules."
+              : "包含策略、模型名、阅读样式与网站规则；导入前展示差异确认。"
+          }
+        >
+          <Button
+            size="sm"
+            icon={<IconDownload size={13} />}
+            onClick={handleExportSettings}
           >
-            <input
-              ref={importFileRef}
-              type="file"
-              accept=".json,application/json"
-              style={{ display: "none" }}
-              onChange={(e) => void handleSelectSettingsFile(e)}
-            />
-            <Button onClick={() => importFileRef.current?.click()}>
-              {en ? "Import settings JSON…" : "选择配置文件预览导入…"}
-            </Button>
-          </label>
-        </div>
+            {en ? "Export JSON" : "导出配置"}
+          </Button>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: "none" }}
+            onChange={(e) => void handleSelectSettingsFile(e)}
+          />
+          <Button
+            size="sm"
+            icon={<IconUpload size={13} />}
+            onClick={() => importFileRef.current?.click()}
+          >
+            {en ? "Import JSON…" : "导入配置…"}
+          </Button>
+        </SettingRow>
 
         {pendingImport ? (
-          <div class="card">
-            <strong>
-              {en
-                ? `Preview changes (${pendingImport.diffs.length} difference(s))`
-                : `导入变更预览（共 ${pendingImport.diffs.length} 项差异）`}
-            </strong>
+          <SettingRow
+            vertical
+            title={
+              en
+                ? `Import Preview (${pendingImport.diffs.length} change(s))`
+                : `变更预览（${pendingImport.diffs.length} 项差异）`
+            }
+          >
             <DataList
               items={pendingImport.diffs}
               getKey={(d) => d.key}
               emptyMessage={
                 en
-                  ? "Selected file matches your current settings."
-                  : "所选配置文件与当前已保存设置完全一致。"
+                  ? "No differences from current settings."
+                  : "与当前配置完全一致。"
               }
               lang={lang}
               renderItem={(d) => (
@@ -482,60 +474,55 @@ export function UpdateSection({
                 </div>
               )}
             />
-            <div class="actions">
+            <div class="actions" style={{ margin: 0 }}>
               <Button
                 variant="primary"
+                size="sm"
                 busy={store.isBusy("update:import-apply")}
                 onClick={handleApplySettingsImport}
               >
-                {en ? "Confirm & apply import" : "确认应用导入"}
+                {en ? "Apply Import" : "确认导入"}
               </Button>
-              <Button variant="ghost" onClick={() => setPendingImport(null)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPendingImport(null)}
+              >
                 {en ? "Cancel" : "取消"}
               </Button>
             </div>
-          </div>
+          </SettingRow>
         ) : null}
-      </fieldset>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>
-          {en ? "Legacy v2 Data Migration" : "旧版数据一次性迁移"}
-        </legend>
-        <FeedbackBanner scope="migration" lang={lang} />
-
-        {/* Q-44: Surface persisted migration.result from PRIVATE! */}
+      <Disclosure
+        summary={en ? "Legacy v2 Data Migration" : "旧版 2.x 数据迁移"}
+      >
         {migrationResult ? (
-          <div class="card">
-            <p class="muted" style={{ margin: 0 }}>
-              {en
-                ? `Previous migration record: Key ${migrationResult.hasKey ? "retained" : "not present"}, ${migrationResult.cacheBuckets ?? 0} legacy cache bucket(s)${migrationResult.migratedAt || migrationResult.time ? ` (${new Date((migrationResult.migratedAt || migrationResult.time)!).toLocaleString()})` : ""}.`
-                : `历史迁移记录：API Key ${migrationResult.hasKey ? "已保留" : "未包含"} · 迁入旧缓存分区 ${migrationResult.cacheBuckets ?? 0} 个${migrationResult.migratedAt || migrationResult.time ? `（${new Date((migrationResult.migratedAt || migrationResult.time)!).toLocaleString()}）` : ""}。`}
-            </p>
-          </div>
+          <p class="hint" style={{ marginBottom: "10px" }}>
+            {en
+              ? `Last migration: Key ${migrationResult.hasKey ? "retained" : "unset"}, ${migrationResult.cacheBuckets ?? 0} bucket(s).`
+              : `上次迁移：API Key ${migrationResult.hasKey ? "已保留" : "未含"} · 旧缓存分区 ${migrationResult.cacheBuckets ?? 0} 个。`}
+          </p>
         ) : null}
-
-        <TextInput
-          label={
-            en
-              ? "6-digit migration code from legacy extension"
-              : "旧版扩展生成的 6 位数字迁移码"
-          }
-          placeholder="000000"
-          inputMode="numeric"
-          maxLength={6}
-          value={migrationCode}
-          onValueInput={(v) => setMigrationCode(v.trim())}
-        />
-        <div class="actions">
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <div style={{ width: "160px" }}>
+            <TextInput
+              placeholder={en ? "6-digit code" : "6 位迁移验证码"}
+              inputMode="numeric"
+              maxLength={6}
+              value={migrationCode}
+              onValueInput={(v) => setMigrationCode(v.trim())}
+            />
+          </div>
           <Button
             busy={store.isBusy("update:migrate")}
             onClick={() => void handleMigrate()}
           >
-            {en ? "Migrate legacy data" : "执行旧版迁移"}
+            {en ? "Migrate" : "执行迁移"}
           </Button>
         </div>
-      </fieldset>
+      </Disclosure>
     </section>
   );
 }

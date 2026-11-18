@@ -18,6 +18,64 @@ export const INLINE_INTERACTIVE_TAGS = new Set([
   "TD",
 ]);
 
+const INLINE_PHRASING_TAGS = new Set([
+  "A",
+  "ABBR",
+  "B",
+  "BDI",
+  "BDO",
+  "CITE",
+  "DATA",
+  "DEL",
+  "DFN",
+  "EM",
+  "FONT",
+  "I",
+  "INS",
+  "MARK",
+  "Q",
+  "RP",
+  "RT",
+  "RUBY",
+  "S",
+  "SMALL",
+  "SPAN",
+  "STRONG",
+  "SUB",
+  "SUP",
+  "TIME",
+  "U",
+  "VAR",
+  "WBR",
+]);
+
+const LEAF_TRANSLATABLE_SELECTOR =
+  BLOCK_SELECTOR + ",div,section,article,main,span,a";
+
+function isCustomElementTag(el: Element): boolean {
+  return el.tagName.includes("-");
+}
+
+function hasStructuralDescendant(
+  rootEl: Element,
+  skipSelector: string,
+): boolean {
+  const stack = Array.from(rootEl.children);
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (cur.matches(skipSelector) || isVisuallyHiddenElement(cur)) continue;
+    if (cur.matches(STRUCTURAL_CHILD_SELECTOR)) return true;
+    if (!INLINE_PHRASING_TAGS.has(cur.tagName.toUpperCase())) {
+      // Custom elements (<ytd-app>, <my-card>) or container tags (<tr>, <ul>) act as structural boundaries
+      return true;
+    }
+    for (const ch of Array.from(cur.children)) {
+      stack.push(ch);
+    }
+  }
+  return false;
+}
+
 export function buildSkipSelector(extraSelector?: string): string {
   const trimmed = (extraSelector || "").trim();
   if (!trimmed) return BASE_SKIP_SELECTOR;
@@ -156,14 +214,11 @@ export function inspectDomElement(
     return { groups: [], descendInto: [] };
   }
 
-  const children = Array.from(el.children);
-  const hasStructuralChild = children.some(
-    (c) => !c.matches(skipSelector) && c.matches(STRUCTURAL_CHILD_SELECTOR),
-  );
+  const hasStructuralChild = hasStructuralDescendant(el, skipSelector);
 
   if (
     !hasStructuralChild &&
-    el.matches(BLOCK_SELECTOR + ",div,section,article,main,span,a")
+    (el.matches(LEAF_TRANSLATABLE_SELECTOR) || isCustomElementTag(el))
   ) {
     const extracted = extractTextPartsFromNodes([el], skipSelector);
     if (
@@ -185,8 +240,8 @@ export function inspectDomElement(
     return { groups: [], descendInto: [] };
   }
 
-  // Element contains structural/block children (e.g. <li>Category<ul>...</ul></li> or <div>Header<p>...</p></div>):
-  // group consecutive direct inline/text child nodes into inline-run units AND descend into structural children!
+  // Element is a root/list/table/custom container or contains structural descendants:
+  // group consecutive direct inline/text child nodes into inline-run units AND descend into structural/container children!
   const groups: ExtractedGroup[] = [];
   const descendInto: Element[] = [];
   let inlineRun: Node[] = [];
@@ -222,7 +277,10 @@ export function inspectDomElement(
         flushInlineRun();
         continue;
       }
-      if (childEl.matches(STRUCTURAL_CHILD_SELECTOR)) {
+      const childIsPureInline =
+        INLINE_PHRASING_TAGS.has(childEl.tagName.toUpperCase()) &&
+        !hasStructuralDescendant(childEl, skipSelector);
+      if (!childIsPureInline) {
         flushInlineRun();
         descendInto.push(childEl);
       } else {

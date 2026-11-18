@@ -5,10 +5,14 @@ import {
   Checkbox,
   Disclosure,
   FeedbackBanner,
+  IconRefresh,
+  SegmentedControl,
   Select,
+  SettingGroup,
+  SettingRow,
   Switch,
+  NumberStepper,
   TextInput,
-  VerdictHero,
   confirmAction,
   feedbackStore,
   resolveError,
@@ -609,235 +613,225 @@ export function ServiceSection({
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "ROUTING & CREDENTIALS" : "当前服务状态"}
-        title={
-          config.routing === "local-only"
-            ? localReady
-              ? en
-                ? "Local-only mode · Connected to mistral-gui"
-                : "仅本地推理就绪 · 不向外部发送原文"
-              : en
-                ? "Local-only mode · Local Token required"
-                : "仅本地模式 · 尚未配置本地管理器 Token"
-            : config.routing === "cloud-only"
-              ? cloudReady
-                ? en
-                  ? "Cloud-only mode · Ready"
-                  : "仅云端服务就绪"
-                : en
-                  ? "Cloud-only mode · API Key not configured"
-                  : "仅云端模式 · 尚未保存云端 API Key（仅离线词库可用）"
-              : localReady && cloudReady
-                ? en
-                  ? "Local-first with Cloud fallback · Both channels configured"
-                  : "本地优先，失败自动回退云端 · 双通道凭据均已就绪"
-                : localReady
-                  ? en
-                    ? "Local-first · Local Token saved (Cloud key unset)"
-                    : "本地优先 · 本地 Token 已配置（云端 Key 未填，本地失败将报错而非回退）"
-                  : cloudReady
-                    ? en
-                      ? "Local-first · Using Cloud fallback until Local Token is set"
-                      : "本地优先 · 本地 Token 未填，当前将回退使用云端服务"
-                    : en
-                      ? "Dictionary-only · Configure Local Token or Cloud Key to translate new text"
-                      : "当前仅离线词库生效 · 配置本地 Token 或云端 Key 后可翻译新段落"
-        }
-        tone={verdictTone}
-        badge={
-          <Badge tone={verdictTone}>
-            {config.routing === "local-only"
-              ? en
-                ? "Local Only"
-                : "仅本地"
-              : config.routing === "cloud-only"
-                ? en
-                  ? "Cloud Only"
-                  : "仅云端"
-                : en
-                  ? "Local First"
-                  : "本地优先"}
-          </Badge>
-        }
-        metrics={[
-          {
-            label: en ? "Local Token" : "本地 Token",
-            value: config.hasLocalToken
-              ? en
-                ? "Saved"
-                : "已保存"
-              : en
-                ? "Not set"
-                : "未配置",
-          },
-          {
-            label: en ? "Cloud Credential" : "云端密钥",
-            value: cloudReady
-              ? en
-                ? "Saved"
-                : "已保存"
-              : en
-                ? "Not set"
-                : "未配置",
-          },
-          {
-            label: en ? "Today Cloud / Local" : "今日请求（云端 / 本地）",
-            value: `${todayStats?.cloudRequests ?? 0} / ${todayStats?.localRequests ?? 0}`,
-          },
-        ]}
-      />
-
       <FeedbackBanner scope="service" lang={lang} />
       <FeedbackBanner message={testBanner} lang={lang} />
 
-      <Select
-        label={en ? "Routing policy" : "调用策略"}
-        value={draft.routing}
-        options={[
-          {
-            value: "local-first",
-            label: en
-              ? "Local-first, fall back to Cloud on failure"
-              : "本地优先，失败回退云端",
-          },
-          {
-            value: "local-only",
-            label: en
-              ? "Local-only (never contact Cloud)"
-              : "仅本地（绝不请求云端）",
-          },
-          {
-            value: "cloud-only",
-            label: en ? "Cloud-only" : "仅云端",
-          },
-        ]}
-        onValueChange={(v) =>
-          updateField("routing", v as ServiceDraft["routing"])
+      <SettingGroup
+        title={en ? "Routing & Status" : "调用策略"}
+        actions={
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <Badge tone={localReady ? "success" : "neutral"}>
+              {en
+                ? `Local: ${localReady ? "Saved" : "Unset"}`
+                : `本地 Token：${localReady ? "已配置" : "未填"}`}
+            </Badge>
+            <Badge tone={cloudReady ? "success" : "neutral"}>
+              {en
+                ? `Cloud: ${cloudReady ? "Saved" : "Unset"}`
+                : `云端密钥：${cloudReady ? "已配置" : "未填"}`}
+            </Badge>
+            <span class="hint">
+              {en
+                ? `Today ${todayStats?.localRequests ?? 0}L / ${todayStats?.cloudRequests ?? 0}C`
+                : `今日 ${todayStats?.localRequests ?? 0} 本地 / ${todayStats?.cloudRequests ?? 0} 云端`}
+            </span>
+          </div>
         }
-      />
+      >
+        <SettingRow
+          title={en ? "Translation routing" : "请求路由方式"}
+          description={
+            draft.routing === "local-only"
+              ? en
+                ? "Never sends any text to external cloud endpoints."
+                : "所有请求仅发往本机 mistral，绝不连接外部云端。"
+              : draft.routing === "cloud-only"
+                ? en
+                  ? "Translates directly via configured cloud service."
+                  : "直接使用下方云端翻译服务。"
+                : en
+                  ? "Uses local mistral first; falls back per-segment to cloud if unavailable."
+                  : "优先请求本机 mistral，不可用时按段自动回退云端。"
+          }
+        >
+          <SegmentedControl
+            value={draft.routing}
+            onChange={(v) => updateField("routing", v)}
+            options={[
+              {
+                value: "local-first",
+                label: en ? "Local-first" : "本地优先",
+              },
+              {
+                value: "local-only",
+                label: en ? "Local-only" : "仅本地",
+              },
+              {
+                value: "cloud-only",
+                label: en ? "Cloud-only" : "仅云端",
+              },
+            ]}
+          />
+        </SettingRow>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>
-          {en ? "mistral-gui Local Model" : "mistral-gui 本地模型"}
-        </legend>
-        <div class="actions">
-          <Button onClick={() => setPasteBoxOpen((o) => !o)}>
-            {en
-              ? "Paste config from mistral-gui"
-              : "粘贴 mistral-gui 一键连接配置"}
-          </Button>
-          <Button
-            busy={store.isBusy("service:deployments")}
-            onClick={handleRefreshDeployments}
-          >
-            {en ? "Refresh local deployments" : "刷新本地部署列表"}
-          </Button>
-        </div>
-
+      <SettingGroup
+        title={en ? "Local Model (mistral)" : "本地模型（mistral）"}
+        actions={
+          <>
+            <Button size="sm" onClick={() => setPasteBoxOpen((o) => !o)}>
+              {en ? "Paste JSON" : "粘贴一键配置"}
+            </Button>
+            <Button
+              size="sm"
+              icon={<IconRefresh size={13} />}
+              busy={store.isBusy("service:deployments")}
+              onClick={handleRefreshDeployments}
+            >
+              {en ? "Refresh" : "刷新实例"}
+            </Button>
+          </>
+        }
+      >
         {pasteBoxOpen ? (
-          <div class="card">
-            <TextInput
-              label={
-                en
-                  ? "Paste JSON copied from mistral-gui Overview / API page"
-                  : "粘贴从 mistral-gui「概览」或「连接与集成」复制的 JSON"
-              }
-              placeholder='{"localUrl":"http://127.0.0.1:19820","localToken":"...","localModel":"..."}'
-              value={pasteJson}
-              onValueInput={(v) => setPasteJson(v)}
-            />
-            <div class="actions">
-              <Button onClick={applyPastedManagerConfig}>
-                {en ? "Fill fields" : "填入表单"}
+          <SettingRow
+            vertical
+            title={
+              en
+                ? "Paste connection JSON from mistral"
+                : "粘贴从 mistral「API 与诊断」复制的 JSON"
+            }
+          >
+            <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+              <TextInput
+                placeholder='{"localUrl":"http://127.0.0.1:19820","localToken":"...","localModel":"..."}'
+                value={pasteJson}
+                onValueInput={(v) => setPasteJson(v)}
+              />
+              <Button variant="primary" onClick={applyPastedManagerConfig}>
+                {en ? "Apply" : "填入"}
               </Button>
               <Button variant="ghost" onClick={() => setPasteBoxOpen(false)}>
-                {en ? "Cancel" : "收起"}
+                {en ? "Close" : "收起"}
               </Button>
             </div>
-          </div>
+          </SettingRow>
         ) : null}
 
-        <div class="grid">
+        <SettingRow
+          title={en ? "Manager URL" : "管理器地址"}
+          description={
+            en ? "Local loopback origin" : "默认 http://127.0.0.1:19820"
+          }
+          error={fieldErrors.localUrl}
+          controlWidth="wide"
+        >
           <TextInput
-            label={en ? "Manager origin URL" : "管理器地址"}
             type="url"
             placeholder="http://127.0.0.1:19820"
             value={draft.localUrl}
-            error={fieldErrors.localUrl}
-            hint={
-              en
-                ? "Loopback origin without /v1 (any trailing /v1 is stripped automatically)."
-                : "填写本机回环地址（若带 /v1 会自动规范化去除）。"
-            }
             onValueInput={(v) => updateField("localUrl", v)}
           />
-          <TextInput
-            label={en ? "Local Token" : "本地 Token"}
-            type="password"
-            autocomplete="new-password"
-            placeholder={
-              config.hasLocalToken
-                ? en
-                  ? "Leave blank to keep saved Token"
-                  : "留空保留已保存的 Token"
-                : en
-                  ? "Paste Token from mistral-gui"
-                  : "粘贴 mistral-gui 中的连接 Token"
-            }
-            value={draft.localToken}
-            onValueInput={(v) => updateField("localToken", v)}
-          />
-        </div>
+        </SettingRow>
 
-        <Checkbox
-          checked={draft.clearLocalToken}
-          onChange={(v) => updateField("clearLocalToken", v)}
-          label={en ? "Remove saved Local Token" : "删除已保存的本地 Token"}
-        />
-
-        <div class="grid">
-          <TextInput
-            label={en ? "Local Deployment / Model ID" : "本地模型／部署 ID"}
-            value={draft.localModel}
-            error={fieldErrors.localModel}
-            onValueInput={(v) => updateField("localModel", v)}
-          />
-          <Select
-            label={en ? "Discovered deployments" : "本地部署列表"}
-            value={deploymentSelectValue}
-            options={[
-              {
-                value: "",
-                label: en ? "Select a deployment…" : "从已刷新的部署中选择…",
-              },
-              ...(deploymentSelectValue === "__custom__"
-                ? [
-                    {
-                      value: "__custom__",
-                      label: en
-                        ? `Custom ID (${draft.localModel})`
-                        : `自定义 ID（${draft.localModel}）`,
-                    },
-                  ]
-                : []),
-              ...deployments.map((d) => ({
-                value: d.id,
-                label: `${d.id} · ${d.model} · ${localizeDeploymentState(d.state, en)}`,
-              })),
-            ]}
-            onValueChange={(v) => {
-              if (v && v !== "__custom__") {
-                updateField("localModel", v);
-              }
+        <SettingRow
+          title={en ? "Access Token" : "本地访问 Token"}
+          description={
+            config.hasLocalToken
+              ? en
+                ? "Saved locally (leave blank to keep)"
+                : "已保存（留空保留原值）"
+              : en
+                ? "Copy from mistral API page"
+                : "在 mistral「API 与诊断」复制"
+          }
+          controlWidth="wide"
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+              width: "100%",
             }}
-          />
-        </div>
-        <p class="hint">{deploymentsNote}</p>
+          >
+            <TextInput
+              type="password"
+              autocomplete="new-password"
+              placeholder={
+                config.hasLocalToken
+                  ? en
+                    ? "•••••••• (saved)"
+                    : "••••••••（已保存）"
+                  : en
+                    ? "Paste Local Token"
+                    : "粘贴本地 Token"
+              }
+              value={draft.localToken}
+              onValueInput={(v) => updateField("localToken", v)}
+            />
+            {config.hasLocalToken ? (
+              <Checkbox
+                checked={draft.clearLocalToken}
+                onChange={(v) => updateField("clearLocalToken", v)}
+                label={en ? "Clear saved Token" : "清除已保存 Token"}
+              />
+            ) : null}
+          </div>
+        </SettingRow>
 
-        <div class="grid">
+        <SettingRow
+          title={en ? "Deployment / Model ID" : "部署实例"}
+          description={deploymentsNote}
+          error={fieldErrors.localModel}
+          controlWidth="wide"
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              width: "100%",
+            }}
+          >
+            {deployments.length > 0 ? (
+              <Select
+                value={deploymentSelectValue}
+                options={[
+                  {
+                    value: "",
+                    label: en ? "Choose discovered…" : "选择已发现实例…",
+                  },
+                  ...(deploymentSelectValue === "__custom__"
+                    ? [
+                        {
+                          value: "__custom__",
+                          label: `${draft.localModel}`,
+                        },
+                      ]
+                    : []),
+                  ...deployments.map((d) => ({
+                    value: d.id,
+                    label: `${d.id} (${localizeDeploymentState(d.state, en)})`,
+                  })),
+                ]}
+                onValueChange={(v) => {
+                  if (v && v !== "__custom__") updateField("localModel", v);
+                }}
+              />
+            ) : null}
+            <TextInput
+              value={draft.localModel}
+              onValueInput={(v) => updateField("localModel", v)}
+            />
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          title={en ? "Compute backend" : "加速后端"}
+          controlWidth="medium"
+        >
           <Select
-            label={en ? "Local compute backend" : "本地计算后端"}
             value={draft.localBackend}
             options={[
               { value: "auto", label: en ? "Follow manager" : "跟随管理器" },
@@ -849,189 +843,237 @@ export function ServiceSection({
               updateField("localBackend", v as ServiceDraft["localBackend"])
             }
           />
-          <TextInput
-            label={
-              en ? "Cold-start wait limit (seconds)" : "冷启动最长等待（秒）"
-            }
-            type="number"
-            min={10}
-            max={600}
-            step={10}
-            value={draft.localStartupTimeoutSec}
-            error={fieldErrors.localStartupTimeoutSec}
-            hint={
-              en
-                ? "Does not count against per-request timeout while weights load."
-                : "模型加载权重期间独立计时，不占用单次请求超时。"
-            }
-            onValueInput={(v) => updateField("localStartupTimeoutSec", v)}
-          />
-        </div>
+        </SettingRow>
 
-        <Switch
-          checked={draft.localAutoStart}
-          onChange={(v) => updateField("localAutoStart", v)}
-          label={
+        <SettingRow
+          title={en ? "On-demand cold start" : "允许按需冷启动等待"}
+          description={
             en
-              ? "Allow on-demand cold start when local model is stopped"
-              : "允许等待本地模型按需冷启动"
+              ? "Wait for model weights to load without failing request timeout."
+              : "本地实例未启动时等待加载权重，独立计时不占单次超时。"
           }
-          hint={
-            en
-              ? "Local cache (up to 256 MiB) stays isolated from Cloud cache."
-              : "词库与修订命中时不请求管理器；本地推理缓存（上限 256 MiB）与云端缓存严格隔离。"
-          }
-        />
-      </fieldset>
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "145px", maxWidth: "100%" }}>
+              <NumberStepper
+                en={en}
+                name={en ? "Cold start timeout" : "冷启动超时"}
+                unit={en ? "s" : "秒"}
+                min={10}
+                max={600}
+                step={10}
+                value={draft.localStartupTimeoutSec}
+                error={fieldErrors.localStartupTimeoutSec}
+                onValueInput={(v) => updateField("localStartupTimeoutSec", v)}
+              />
+            </div>
+            <Switch
+              checked={draft.localAutoStart}
+              onChange={(v) => updateField("localAutoStart", v)}
+            />
+          </div>
+        </SettingRow>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>{en ? "Cloud Translation Service" : "云端翻译服务"}</legend>
-        <div class="grid">
-          <Select
-            label={en ? "Service protocol" : "服务接口类型"}
+      <SettingGroup
+        title={en ? "Cloud Service" : "云端翻译服务"}
+        actions={
+          <div style={{ width: "210px" }}>
+            <Select
+              value=""
+              options={[
+                {
+                  value: "",
+                  label: en ? "Fill from preset…" : "选择服务商预设…",
+                },
+                ...PROVIDER_PRESETS.map((p) => ({
+                  value: p.id,
+                  label: en ? p.labelEn : p.labelZh,
+                })),
+              ]}
+              onValueChange={(presetId) => {
+                const preset = PROVIDER_PRESETS.find((p) => p.id === presetId);
+                if (!preset) return;
+                setTestBanner(null);
+                setDraft((prev) => ({
+                  ...prev,
+                  serviceType: preset.serviceType,
+                  ...(preset.serviceType === "deepl"
+                    ? { deeplUrl: preset.url }
+                    : { apiUrl: preset.url, model: preset.model }),
+                }));
+              }}
+            />
+          </div>
+        }
+      >
+        <SettingRow
+          title={en ? "Protocol" : "接口协议"}
+          description={
+            draft.serviceType === "deepl"
+              ? en
+                ? "DeepL v2 REST API with XML tag protection"
+                : "DeepL 官方翻译接口"
+              : en
+                ? "OpenAI-compatible /v1/chat/completions"
+                : "OpenAI 兼容 Chat Completions 接口"
+          }
+        >
+          <SegmentedControl
             value={draft.serviceType}
+            onChange={(v) => updateField("serviceType", v)}
             options={[
-              {
-                value: "chat",
-                label: en
-                  ? "OpenAI-compatible Chat Completions"
-                  : "OpenAI 兼容对话接口（Chat Completions）",
-              },
-              {
-                value: "deepl",
-                label: en
-                  ? "DeepL Translation API"
-                  : "DeepL 专用翻译接口（XML 占位符保护）",
-              },
+              { value: "chat", label: "Chat API" },
+              { value: "deepl", label: "DeepL" },
             ]}
-            onValueChange={(v) =>
-              updateField("serviceType", v as "chat" | "deepl")
-            }
           />
-          <Select
-            label={en ? "Quick provider preset" : "常用服务商预设"}
-            value=""
-            options={[
-              {
-                value: "",
-                label: en
-                  ? "Choose a preset to fill URL…"
-                  : "选择预设一键填入地址与推荐模型…",
-              },
-              ...PROVIDER_PRESETS.map((p) => ({
-                value: p.id,
-                label: en ? p.labelEn : p.labelZh,
-              })),
-            ]}
-            onValueChange={(presetId) => {
-              const preset = PROVIDER_PRESETS.find((p) => p.id === presetId);
-              if (!preset) return;
-              setTestBanner(null);
-              setDraft((prev) => ({
-                ...prev,
-                serviceType: preset.serviceType,
-                ...(preset.serviceType === "deepl"
-                  ? { deeplUrl: preset.url }
-                  : { apiUrl: preset.url, model: preset.model }),
-              }));
-            }}
-          />
-        </div>
+        </SettingRow>
 
         {draft.serviceType === "deepl" ? (
           <>
-            <div class="grid">
+            <SettingRow
+              title={en ? "DeepL Endpoint" : "DeepL 接口地址"}
+              error={fieldErrors.deeplUrl}
+              controlWidth="wide"
+            >
               <TextInput
-                label={en ? "DeepL Endpoint URL" : "DeepL 接口地址"}
                 type="url"
                 placeholder="https://api.deepl.com/v2/translate"
                 value={draft.deeplUrl}
-                error={fieldErrors.deeplUrl}
                 onValueInput={(v) => updateField("deeplUrl", v)}
               />
-              <TextInput
-                label="DeepL Auth Key"
-                type="password"
-                autocomplete="new-password"
-                placeholder={
-                  config.hasDeeplKey
-                    ? en
-                      ? "Leave blank to keep saved DeepL Key"
-                      : "留空保留已保存的 DeepL Key"
-                    : en
-                      ? "Enter DeepL API Key"
-                      : "输入 DeepL Auth Key"
-                }
-                value={draft.deeplKey}
-                onValueInput={(v) => updateField("deeplKey", v)}
-              />
-            </div>
-            <Checkbox
-              checked={draft.clearDeeplKey}
-              onChange={(v) => updateField("clearDeeplKey", v)}
-              label={en ? "Remove saved DeepL Key" : "删除已保存的 DeepL Key"}
-            />
+            </SettingRow>
+            <SettingRow
+              title="DeepL Auth Key"
+              description={
+                config.hasDeeplKey
+                  ? en
+                    ? "Saved (leave blank to keep)"
+                    : "已保存（留空保留）"
+                  : undefined
+              }
+              controlWidth="wide"
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  width: "100%",
+                }}
+              >
+                <TextInput
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder={
+                    config.hasDeeplKey
+                      ? "••••••••"
+                      : en
+                        ? "Enter DeepL Key"
+                        : "输入 DeepL Auth Key"
+                  }
+                  value={draft.deeplKey}
+                  onValueInput={(v) => updateField("deeplKey", v)}
+                />
+                {config.hasDeeplKey ? (
+                  <Checkbox
+                    checked={draft.clearDeeplKey}
+                    onChange={(v) => updateField("clearDeeplKey", v)}
+                    label={en ? "Clear saved Key" : "清除已保存 Key"}
+                  />
+                ) : null}
+              </div>
+            </SettingRow>
           </>
         ) : (
           <>
-            <div class="grid">
+            <SettingRow
+              title={en ? "Endpoint URL" : "接口地址"}
+              error={fieldErrors.apiUrl}
+              controlWidth="wide"
+            >
               <TextInput
-                label={en ? "Cloud API URL" : "API 地址"}
                 type="url"
                 autocomplete="off"
                 value={draft.apiUrl}
-                error={fieldErrors.apiUrl}
                 onValueInput={(v) => updateField("apiUrl", v)}
               />
-              <TextInput
-                label="API Key"
-                type="password"
-                autocomplete="new-password"
-                placeholder={
-                  config.hasKey
-                    ? en
-                      ? "Leave blank to keep saved Key"
-                      : "留空保留已保存的 Key"
-                    : en
-                      ? "Enter API Key"
-                      : "输入云端 API Key"
-                }
-                value={draft.apiKey}
-                onValueInput={(v) => updateField("apiKey", v)}
-              />
-            </div>
-            <Checkbox
-              checked={draft.clearKey}
-              onChange={(v) => updateField("clearKey", v)}
-              label={en ? "Remove saved API Key" : "删除已保存的云端 API Key"}
-            />
-            <TextInput
-              label={en ? "Cloud Model ID" : "云端模型名称"}
-              autocomplete="off"
-              value={draft.model}
-              error={fieldErrors.model}
-              hint={
+            </SettingRow>
+            <SettingRow
+              title="API Key"
+              description={
+                config.hasKey
+                  ? en
+                    ? "Saved (leave blank to keep)"
+                    : "已保存（留空保留）"
+                  : undefined
+              }
+              controlWidth="wide"
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  width: "100%",
+                }}
+              >
+                <TextInput
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder={
+                    config.hasKey
+                      ? "••••••••（已保存）"
+                      : en
+                        ? "Enter API Key"
+                        : "输入 API Key"
+                  }
+                  value={draft.apiKey}
+                  onValueInput={(v) => updateField("apiKey", v)}
+                />
+                {config.hasKey ? (
+                  <Checkbox
+                    checked={draft.clearKey}
+                    onChange={(v) => updateField("clearKey", v)}
+                    label={en ? "Clear saved Key" : "清除已保存 Key"}
+                  />
+                ) : null}
+              </div>
+            </SettingRow>
+            <SettingRow
+              title={en ? "Model ID" : "模型名称"}
+              description={
                 isSingleModel
                   ? en
-                    ? "Hunyuan-MT uses single-segment official prompts; cache hits are unaffected."
-                    : "Hunyuan-MT 按官方协议逐段翻译；需要合并批次时可改选支持 JSON 输出的对话模型。"
+                    ? "Hunyuan-MT single-segment mode"
+                    : "Hunyuan-MT 专用逐段模式"
                   : en
-                    ? "Supports JSON batching in Cloud-only mode."
-                    : "支持在「仅云端」模式下开启 JSON 批量合并请求。"
+                    ? "Supports JSON batching in Cloud-only mode"
+                    : "支持 JSON 批量合并"
               }
-              onValueInput={(v) => updateField("model", v)}
-            />
+              error={fieldErrors.model}
+              controlWidth="wide"
+            >
+              <TextInput
+                autocomplete="off"
+                value={draft.model}
+                onValueInput={(v) => updateField("model", v)}
+              />
+            </SettingRow>
           </>
         )}
-      </fieldset>
+      </SettingGroup>
 
       <Disclosure
-        summary={en ? "Advanced Request & Rate Settings" : "高级请求与批量设置"}
+        summary={
+          en ? "Concurrency, Timeout & Rate Limits" : "并发、超时与批量策略"
+        }
       >
         <div class="grid">
-          <TextInput
-            label={en ? "Request interval (seconds)" : "请求最小间隔（秒）"}
-            type="number"
+          <NumberStepper
+            label={en ? "Min interval (sec)" : "请求间隔（秒）"}
+            en={en}
+            unit={en ? "s" : "秒"}
             min={0}
             max={120}
             step={0.5}
@@ -1039,9 +1081,10 @@ export function ServiceSection({
             error={fieldErrors.intervalSec}
             onValueInput={(v) => updateField("intervalSec", v)}
           />
-          <TextInput
-            label={en ? "Per-request timeout (seconds)" : "单次超时（秒）"}
-            type="number"
+          <NumberStepper
+            label={en ? "Timeout (sec)" : "单次超时（秒）"}
+            en={en}
+            unit={en ? "s" : "秒"}
             min={10}
             max={180}
             step={5}
@@ -1049,9 +1092,9 @@ export function ServiceSection({
             error={fieldErrors.timeoutSec}
             onValueInput={(v) => updateField("timeoutSec", v)}
           />
-          <TextInput
-            label={en ? "Max concurrency (1–4)" : "最大并发请求数（1–4）"}
-            type="number"
+          <NumberStepper
+            label={en ? "Max concurrency (1–4)" : "最大并发数（1–4）"}
+            en={en}
             min={1}
             max={4}
             step={1}
@@ -1064,66 +1107,48 @@ export function ServiceSection({
           checked={batchEligible && draft.batch}
           disabled={!batchEligible}
           onChange={(v) => updateField("batch", v)}
-          label={
-            en
-              ? "Batch translation (up to 16 segments after first paint)"
-              : "批量翻译（首屏最多 4 段，后续每批最多 16 段）"
-          }
+          label={en ? "JSON Batching" : "开启 JSON 批量合并请求"}
           hint={batchHint}
         />
       </Disclosure>
 
       <Disclosure
         summary={
-          en
-            ? "Usage Statistics & Daily Cloud Cap"
-            : "用量统计、费用估算与每日云端上限"
+          en ? "Usage Stats & Daily Cloud Cap" : "用量统计与每日云端上限"
         }
       >
         <div class="grid">
-          <TextInput
+          <NumberStepper
             label={
-              en
-                ? "Daily cloud request limit (0 = unlimited)"
-                : "每日云端请求次数上限（0 为不限）"
+              en ? "Daily request cap (0 = off)" : "每日云端请求上限（0 不限）"
             }
-            type="number"
+            en={en}
             min={0}
             step={10}
             value={draft.dailyRequestLimit}
             onValueInput={(v) => updateField("dailyRequestLimit", v)}
           />
-          <TextInput
+          <NumberStepper
             label={
-              en
-                ? "Daily cloud token limit (0 = unlimited)"
-                : "每日云端 Token 上限（0 为不限）"
+              en ? "Daily token cap (0 = off)" : "每日云端 Token 上限（0 不限）"
             }
-            type="number"
+            en={en}
             min={0}
             step={1000}
             value={draft.dailyTokenLimit}
             onValueInput={(v) => updateField("dailyTokenLimit", v)}
           />
-          <TextInput
-            label={
-              en
-                ? "Input price / 1M tokens"
-                : "输入单价（每百万 Token，用于估算）"
-            }
-            type="number"
+          <NumberStepper
+            label={en ? "Input price / 1M" : "输入单价 / 百万 Token"}
+            en={en}
             min={0}
             step={0.01}
             value={draft.inputPricePerMillion}
             onValueInput={(v) => updateField("inputPricePerMillion", v)}
           />
-          <TextInput
-            label={
-              en
-                ? "Output price / 1M tokens"
-                : "输出单价（每百万 Token，用于估算）"
-            }
-            type="number"
+          <NumberStepper
+            label={en ? "Output price / 1M" : "输出单价 / 百万 Token"}
+            en={en}
             min={0}
             step={0.01}
             value={draft.outputPricePerMillion}
@@ -1131,28 +1156,31 @@ export function ServiceSection({
           />
         </div>
         {usage ? (
-          <div class="card">
-            <p class="muted">
+          <div
+            class="split-head"
+            style={{
+              marginTop: "10px",
+              paddingTop: "10px",
+              borderTop: "1px solid var(--color-border)",
+            }}
+          >
+            <span class="hint">
               {en
-                ? `Cumulative — Cloud: ${usage.totalCloudRequests} req (${usage.totalCloudRetries} retries), Local: ${usage.totalLocalRequests} req, Tokens: ${usage.totalPromptTokens + usage.totalCompletionTokens} (${usage.estimatedCount > 0 ? `incl. ${usage.estimatedCount} char-estimated` : "exact"})${estimatedCost ? ` · Est. cost: ${estimatedCost.toFixed(4)}` : ""}`
-                : `累计统计 —— 云端请求 ${usage.totalCloudRequests} 次（含重试 ${usage.totalCloudRetries} 次）· 本地请求 ${usage.totalLocalRequests} 次 · 累计 Token ${(usage.totalPromptTokens + usage.totalCompletionTokens).toLocaleString()}（输入 ${usage.totalPromptTokens.toLocaleString()} / 输出 ${usage.totalCompletionTokens.toLocaleString()}${usage.estimatedCount ? `，其中 ${usage.estimatedCount} 次按字符估算` : ""}）${estimatedCost ? ` · 估算费用 ${estimatedCost.toFixed(4)}` : ""}`}
-            </p>
-            <p class="hint">
-              {en
-                ? "Stored locally only; never included in diagnostic exports."
-                : "用量仅保存在本机浏览器中，导出诊断时不会附带。达到每日云端上限后云端通道自动暂停，不影响本地模型与离线词库。"}
-            </p>
-            <div class="actions">
-              <Button onClick={loadUsage}>
-                {en ? "Refresh usage" : "刷新用量"}
+                ? `Cloud ${usage.totalCloudRequests} req · Local ${usage.totalLocalRequests} req · ${(usage.totalPromptTokens + usage.totalCompletionTokens).toLocaleString()} tokens${estimatedCost ? ` · Est. ${estimatedCost.toFixed(4)}` : ""}`
+                : `累计：云端 ${usage.totalCloudRequests} 次 · 本地 ${usage.totalLocalRequests} 次 · Token ${(usage.totalPromptTokens + usage.totalCompletionTokens).toLocaleString()}${estimatedCost ? ` · 估算 ${estimatedCost.toFixed(4)}` : ""}`}
+            </span>
+            <div class="actions" style={{ margin: 0 }}>
+              <Button size="sm" onClick={loadUsage}>
+                {en ? "Refresh" : "刷新"}
               </Button>
               <Button
+                size="sm"
                 variant="danger"
                 onClick={async () => {
                   const ok = await confirmAction({
                     message: en
                       ? "Clear all recorded usage statistics?"
-                      : "确定清零本地记录的全部用量统计吗？",
+                      : "确定清零本地用量统计吗？",
                     danger: true,
                     lang,
                   });
@@ -1161,43 +1189,41 @@ export function ServiceSection({
                     scopedRpc(t).send("USAGE_CLEAR"),
                   );
                   await loadUsage();
-                  toast(
-                    en ? "Usage statistics cleared." : "已清零用量统计。",
-                    "success",
-                  );
+                  toast(en ? "Usage cleared." : "已清零用量统计。", "success");
                 }}
               >
-                {en ? "Reset usage stats" : "清零统计"}
+                {en ? "Reset" : "清零"}
               </Button>
             </div>
           </div>
         ) : null}
       </Disclosure>
 
-      <div class="actions">
+      <div class="actions" style={{ marginTop: "16px" }}>
         <Button
           variant="primary"
           busy={store.isBusy("service:save")}
           onClick={handleSave}
         >
-          {en ? "Save service settings" : "保存服务配置"}
+          {en ? "Save Changes" : "保存配置"}
         </Button>
         <Button busy={store.isBusy("service:test")} onClick={handleTest}>
-          {en ? "Test connection" : "测试连接"}
+          {en ? "Test Connection" : "测试连接"}
         </Button>
         {store.isBusy("service:test") ? (
           <Button variant="ghost" onClick={() => testAbortRef.current?.abort()}>
-            {en ? "Cancel test" : "取消测试"}
+            {en ? "Cancel" : "取消"}
           </Button>
         ) : null}
         <Button
+          variant="ghost"
           onClick={async () => {
             if (dirtySections.length > 0) {
               const listText = dirtySections.join(en ? ", " : "、");
               const ok = await confirmAction({
                 message: en
-                  ? `Reloading saved settings will discard unsaved edits in: ${listText}. Continue?`
-                  : `重新读取配置将放弃以下分区中尚未保存的更改：${listText}。确定继续吗？`,
+                  ? `Discard unsaved edits in ${listText}?`
+                  : `放弃未保存的修改（${listText}）并重新读取配置？`,
                 lang,
               });
               if (!ok) return;
@@ -1205,13 +1231,10 @@ export function ServiceSection({
             await onReloadAll();
             setTestBanner(null);
             setFieldErrors({});
-            toast(
-              en ? "Reloaded saved settings." : "已重新读取已保存的配置。",
-              "info",
-            );
+            toast(en ? "Reloaded." : "已重新读取配置。", "info");
           }}
         >
-          {en ? "Reload saved config" : "重新读取配置"}
+          {en ? "Revert" : "还原已存配置"}
         </Button>
       </div>
     </section>

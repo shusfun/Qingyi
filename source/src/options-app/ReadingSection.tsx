@@ -5,10 +5,17 @@ import {
   DataList,
   Disclosure,
   FeedbackBanner,
+  IconExternalLink,
+  IconFileText,
+  IconPlus,
+  IconTrash,
+  SegmentedControl,
   Select,
+  SettingGroup,
+  SettingRow,
   Switch,
+  Slider,
   TextInput,
-  VerdictHero,
   confirmAction,
   feedbackStore,
   runTracked,
@@ -131,6 +138,8 @@ export function ReadingSection({
           trace: t,
         });
         await rpc.send("PREFERENCES", {
+          theme,
+          visible: progressVisible,
           translationStyle: styleCfg,
         });
         onSavedConfig(await rpc.send<SettingsView>("PRIVATE"));
@@ -265,291 +274,305 @@ export function ReadingSection({
 
   return (
     <section class="page panel">
-      <VerdictHero
-        eyebrow={en ? "READING EXPERIENCE" : "当前阅读偏好"}
-        title={
-          mode === "bilingual"
-            ? en
-              ? "Bilingual comparison · Embedded inside original blocks"
-              : "双语对照模式 · 译文嵌在原段落内部，不破坏表格与布局"
-            : en
-              ? "Translated view · Hover or click to peek original text"
-              : "译文模式 · 悬停可预览原文，Alt+点击可单段切换原文"
-        }
-        badge={
-          <Badge tone="neutral">
-            {targetLangOptions.find((o) => o.value === targetLang)?.label ||
-              targetLang}
-          </Badge>
-        }
-        metrics={[
-          {
-            label: en ? "Site rules" : "站点规则数",
-            value: String(siteEntries.length),
-          },
-          {
-            label: en ? "Attribute translation" : "属性文本翻译",
-            value: translateAttributes
-              ? en
-                ? "On"
-                : "开启"
-              : en
-                ? "Off"
-                : "关闭",
-          },
-          {
-            label: en ? "Local file / PDF" : "本地文件权限",
-            value:
-              fileAccessAllowed === null
-                ? en
-                  ? "Unknown"
-                  : "未知"
-                : fileAccessAllowed
-                  ? en
-                    ? "Granted"
-                    : "已开启"
-                  : en
-                    ? "Not enabled"
-                    : "未开启",
-          },
-        ]}
-      />
-
       <FeedbackBanner scope="reading" lang={lang} />
 
-      <fieldset>
-        <legend>{en ? "Language & Display Mode" : "目标语言与显示方式"}</legend>
-        <div class="grid">
-          <Select
-            label={en ? "Target translation language" : "默认目标语言"}
-            value={targetLang}
-            options={targetLangOptions}
-            onValueChange={(v) => setTargetLang(v)}
-          />
-          <Select
-            label={en ? "Default reading mode" : "默认显示方式"}
-            value={mode}
-            options={[
-              {
-                value: "chinese",
-                label: en ? "Translated text mode" : "译文模式（悬停可看原文）",
-              },
-              {
-                value: "bilingual",
-                label: en ? "Bilingual side-by-side" : "双语对照（段落内嵌）",
-              },
-            ]}
-            onValueChange={(v) => setMode(v as "chinese" | "bilingual")}
-          />
-        </div>
-
-        <Switch
-          checked={translateAttributes}
-          onChange={(v) => setTranslateAttributes(v)}
-          label={
-            en
-              ? "Translate placeholder, title, alt, and aria-label attributes"
-              : "同时翻译输入框提示（placeholder）、按钮提示（title / aria-label）与图片说明（alt）"
-          }
-          hint={
-            en
-              ? "Restoring original page restores all original attributes cleanly."
-              : "点击「恢复原文」时会完整还原所有原始属性值。"
-          }
-        />
-
-        <Disclosure
-          summary={
-            en ? "Bilingual Style & Live Preview" : "双语对照样式微调与实时预览"
-          }
-        >
-          <div class="grid">
-            <TextInput
-              label={
-                en
-                  ? `Translation opacity (${styleCfg.opacity})`
-                  : `译文不透明度（${styleCfg.opacity}）`
-              }
-              type="number"
-              min={0.5}
-              max={1}
-              step={0.02}
-              value={styleCfg.opacity}
-              onValueInput={(v) =>
-                setStyleCfg((s) => ({
-                  ...s,
-                  opacity: Math.min(1, Math.max(0.5, Number(v) || 0.92)),
-                }))
-              }
-            />
-            <TextInput
-              label={
-                en
-                  ? `Vertical spacing (${styleCfg.gapPx}px)`
-                  : `原文与译文间距（${styleCfg.gapPx}px）`
-              }
-              type="number"
-              min={0}
-              max={16}
-              step={1}
-              value={styleCfg.gapPx}
-              onValueInput={(v) =>
-                setStyleCfg((s) => ({
-                  ...s,
-                  gapPx: Math.min(16, Math.max(0, Math.round(Number(v) || 0))),
-                }))
-              }
-            />
-            <TextInput
-              label={
-                en
-                  ? `Quote bar width (${styleCfg.strokePx}px)`
-                  : `左侧引线粗细（${styleCfg.strokePx}px）`
-              }
-              type="number"
-              min={0}
-              max={6}
-              step={1}
-              value={styleCfg.strokePx}
-              onValueInput={(v) =>
-                setStyleCfg((s) => ({
-                  ...s,
-                  strokePx: Math.min(
-                    6,
-                    Math.max(0, Math.round(Number(v) || 0)),
-                  ),
-                }))
-              }
-            />
-            <TextInput
-              label={
-                en
-                  ? `Left inset (${styleCfg.insetPx}px)`
-                  : `译文左内边距（${styleCfg.insetPx}px）`
-              }
-              type="number"
-              min={0}
-              max={20}
-              step={1}
-              value={styleCfg.insetPx}
-              onValueInput={(v) =>
-                setStyleCfg((s) => ({
-                  ...s,
-                  insetPx: Math.min(
-                    20,
-                    Math.max(0, Math.round(Number(v) || 0)),
-                  ),
-                }))
-              }
-            />
-          </div>
-          <div class="card">
-            <p style={{ margin: 0 }}>
-              Reading should return to the text itself, without breaking layout.
-              <span
-                style={{
-                  display: "block",
-                  opacity: styleCfg.opacity,
-                  marginBlockStart: `${styleCfg.gapPx}px`,
-                  borderInlineStart: `${styleCfg.strokePx}px solid currentColor`,
-                  paddingInlineStart: `${styleCfg.insetPx}px`,
-                }}
-              >
-                阅读应当回到文字本身，而不破坏原有页面排版。
-              </span>
-            </p>
-          </div>
-          <div class="actions">
-            <Button onClick={() => setStyleCfg({ ...DEFAULT_STYLE })}>
-              {en ? "Reset default style" : "恢复默认译文样式"}
-            </Button>
-          </div>
-        </Disclosure>
-
-        <div class="actions">
+      <SettingGroup
+        title={en ? "Translation & Display" : "翻译语言与展示方式"}
+        actions={
           <Button
+            size="sm"
             variant="primary"
             busy={store.isBusy("reading:save")}
             onClick={handleSaveReading}
           >
-            {en ? "Save reading preferences" : "保存阅读设置"}
+            {en ? "Save Preferences" : "保存阅读设置"}
+          </Button>
+        }
+      >
+        <SettingRow
+          title={en ? "Default target language" : "默认目标语言"}
+          controlWidth="medium"
+        >
+          <Select
+            value={targetLang}
+            options={targetLangOptions}
+            onValueChange={(v) => setTargetLang(v)}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title={en ? "Reading mode" : "网页显示模式"}
+          description={
+            mode === "bilingual"
+              ? en
+                ? "Inserts translation inside original blocks without breaking tables or flex layouts."
+                : "在原段落内嵌显示译文，不破坏表格与布局。"
+              : en
+                ? "Replaces paragraph text cleanly in-place."
+                : "直接原位替换为译文。"
+          }
+        >
+          <SegmentedControl
+            value={mode}
+            onChange={(v) => setMode(v)}
+            options={[
+              { value: "chinese", label: en ? "Translated" : "仅译文" },
+              { value: "bilingual", label: en ? "Bilingual" : "双语对照" },
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title={en ? "Translate UI attributes" : "翻译输入框提示与无障碍属性"}
+          description={
+            en
+              ? "Includes placeholder, title, alt, and aria-label"
+              : "包含 placeholder、title、alt 与 aria-label"
+          }
+        >
+          <Switch
+            checked={translateAttributes}
+            onChange={(v) => setTranslateAttributes(v)}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      <Disclosure
+        summary={
+          en ? "Bilingual Typography & Live Preview" : "双语对照排版微调与预览"
+        }
+      >
+        <div class="grid">
+          <Slider
+            label={en ? "Opacity" : "译文不透明度"}
+            min={0.5}
+            max={1}
+            step={0.02}
+            value={styleCfg.opacity}
+            onValueInput={(value) =>
+              setStyleCfg((current) => ({ ...current, opacity: value }))
+            }
+          />
+          <Slider
+            label={en ? "Spacing" : "上下间距"}
+            min={0}
+            max={16}
+            step={1}
+            unit="px"
+            value={styleCfg.gapPx}
+            onValueInput={(value) =>
+              setStyleCfg((current) => ({ ...current, gapPx: value }))
+            }
+          />
+          <Slider
+            label={en ? "Bar width" : "引线粗细"}
+            min={0}
+            max={6}
+            step={1}
+            unit="px"
+            value={styleCfg.strokePx}
+            onValueInput={(value) =>
+              setStyleCfg((current) => ({ ...current, strokePx: value }))
+            }
+          />
+          <Slider
+            label={en ? "Left inset" : "左侧缩进"}
+            min={0}
+            max={20}
+            step={1}
+            unit="px"
+            value={styleCfg.insetPx}
+            onValueInput={(value) =>
+              setStyleCfg((current) => ({ ...current, insetPx: value }))
+            }
+          />
+        </div>
+        <div class="copy-box" style={{ marginTop: "10px", display: "block" }}>
+          <p style={{ margin: 0, fontSize: "var(--font-sm)" }}>
+            Clear, fast, local-first web translation without page clutter.
+            <span
+              style={{
+                display: "block",
+                opacity: styleCfg.opacity,
+                marginBlockStart: `${styleCfg.gapPx}px`,
+                borderInlineStart: `${styleCfg.strokePx}px solid var(--color-accent)`,
+                paddingInlineStart: `${styleCfg.insetPx}px`,
+              }}
+            >
+              清晰、快速、本地优先的网页翻译，不打扰原有页面排版。
+            </span>
+          </p>
+        </div>
+        <div class="actions" style={{ marginBottom: 0 }}>
+          <Button size="sm" onClick={() => setStyleCfg({ ...DEFAULT_STYLE })}>
+            {en ? "Reset Style" : "恢复默认样式"}
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            busy={store.isBusy("reading:save")}
+            onClick={handleSaveReading}
+          >
+            {en ? "Apply Style" : "保存样式"}
           </Button>
         </div>
-      </fieldset>
+      </Disclosure>
 
-      <fieldset>
-        <legend>
-          {en ? "Interface Appearance & Overlay" : "界面外观与进度浮层"}
-        </legend>
-        <div class="grid">
-          <Select
-            label={en ? "Color theme" : "外观主题"}
+      <SettingGroup title={en ? "Appearance & Progress Bar" : "外观与进度条"}>
+        <SettingRow title={en ? "Theme" : "外观主题"}>
+          <SegmentedControl
             value={theme}
+            onChange={(v) => void handleImmediatePref({ nextTheme: v })}
             options={[
-              { value: "system", label: en ? "Follow system" : "跟随系统" },
+              { value: "system", label: en ? "System" : "跟随系统" },
               { value: "light", label: en ? "Light" : "浅色" },
               { value: "dark", label: en ? "Dark" : "深色" },
             ]}
-            onValueChange={(v) =>
-              void handleImmediatePref({ nextTheme: v as Theme })
-            }
           />
-          <Select
-            label={en ? "Interface language" : "设置页与浮层语言"}
+        </SettingRow>
+
+        <SettingRow title={en ? "Interface language" : "界面语言"}>
+          <SegmentedControl
             value={locale}
+            onChange={(v) => void handleImmediatePref({ nextLocale: v })}
             options={[
               { value: "zh-CN", label: "简体中文" },
               { value: "en", label: "English" },
             ]}
-            onValueChange={(v) =>
-              void handleImmediatePref({ nextLocale: v as "zh-CN" | "en" })
-            }
           />
-        </div>
-        <Switch
-          checked={progressVisible}
-          onChange={(v) => void handleImmediatePref({ nextVisible: v })}
-          label={
+        </SettingRow>
+
+        <SettingRow
+          title={
             en
-              ? "Show floating progress pill automatically while translating"
-              : "翻译时默认显示右下角小进度条（关闭后仍会在出错时提示，或右键随时呼出）"
+              ? "Show progress pill while translating"
+              : "翻译时显示右下角小进度条"
           }
-        />
-      </fieldset>
+          description={
+            en
+              ? "Only mounts during active translation; errors always surface."
+              : "仅在激活翻译时挂载，关闭后仍可通过右键菜单随时查看。"
+          }
+        >
+          <Switch
+            checked={progressVisible}
+            onChange={(v) => void handleImmediatePref({ nextVisible: v })}
+          />
+        </SettingRow>
+      </SettingGroup>
 
-      <fieldset>
-        <legend>{en ? "Per-Site Rules" : "网站专属规则"}</legend>
-        <p class="hint">
-          {en
-            ? "Configure auto-translate, never-translate, main-article-only, or custom CSS skip selectors per origin."
-            : "可按网站域名设置自动翻译、永不翻译、仅翻译正文（跳过导航侧栏页脚）或自定义跳过选择器。"}
-        </p>
+      <SettingGroup
+        title={en ? "PDF Reader & Shortcuts" : "内置 PDF 阅读器与快捷键"}
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<IconFileText size={14} />}
+              onClick={() => {
+                window.open(chrome.runtime.getURL("pdf.html"), "_blank");
+              }}
+            >
+              {en ? "Open PDF Translator" : "打开 PDF 翻译器"}
+            </Button>
+            <Button
+              size="sm"
+              icon={<IconExternalLink size={13} />}
+              onClick={() => {
+                void chrome.tabs.create({
+                  url: "chrome://extensions/shortcuts",
+                });
+              }}
+            >
+              {en ? "Shortcuts" : "修改快捷键"}
+            </Button>
+          </>
+        }
+      >
+        <SettingRow
+          title={en ? "Local file:// URL access" : "本地 file:// 网页访问权限"}
+          description={
+            fileAccessAllowed
+              ? en
+                ? "Enabled in browser extension settings."
+                : "已在浏览器扩展详情中开启。"
+              : en
+                ? "Enable 'Allow access to file URLs' to translate local HTML files."
+                : "如需直接右键翻译本地 HTML 文件，请在扩展详情页开启「允许访问文件网址」。"
+          }
+        >
+          {fileAccessAllowed ? (
+            <Badge tone="success">{en ? "Enabled" : "已开启"}</Badge>
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => {
+                void chrome.tabs.create({
+                  url: `chrome://extensions/?id=${chrome.runtime.id}`,
+                });
+              }}
+            >
+              {en ? "Enable…" : "去开启…"}
+            </Button>
+          )}
+        </SettingRow>
 
+        {commands
+          .filter((c) => c.name && c.name !== "_execute_action")
+          .map((c) => (
+            <SettingRow key={c.name} title={c.description || c.name}>
+              <Badge>{c.shortcut || (en ? "Unassigned" : "未绑定")}</Badge>
+            </SettingRow>
+          ))}
+      </SettingGroup>
+
+      <SettingGroup
+        title={en ? "Per-Site Rules" : "网站专属规则"}
+        padded
+        actions={
+          lastRemovedSite ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                const snap = lastRemovedSite;
+                setLastRemovedSite(null);
+                await runTracedUiOp("undo-remove-site", async (t) => {
+                  const rpc = scopedRpc(t);
+                  await rpc.send("SAVE_SITE_RULE", snap);
+                  onSavedConfig(await rpc.send<SettingsView>("PRIVATE"));
+                });
+                toast(
+                  en ? `Restored ${snap.origin}.` : `已恢复 ${snap.origin}`,
+                  "success",
+                );
+              }}
+            >
+              {en ? "Undo remove" : `撤销移除（${lastRemovedSite.origin}）`}
+            </Button>
+          ) : null
+        }
+      >
         <div class="grid">
           <TextInput
-            label={en ? "Website URL or origin" : "网站地址"}
+            label={en ? "Website URL" : "网站域名或地址"}
             type="url"
             placeholder="https://news.ycombinator.com"
             value={siteOrigin}
             onValueInput={(v) => setSiteOrigin(v)}
           />
           <Select
-            label={en ? "Behavior" : "触发策略"}
+            label={en ? "Behavior" : "触发行为"}
             value={siteBehavior}
             options={[
-              {
-                value: "auto",
-                label: en ? "Auto-translate on load" : "打开页面自动翻译",
-              },
+              { value: "auto", label: en ? "Auto-translate" : "打开自动翻译" },
               {
                 value: "never",
-                label: en ? "Never auto-translate" : "从不自动翻译（黑名单）",
+                label: en ? "Never translate" : "永不自动翻译",
               },
               {
                 value: "default",
-                label: en
-                  ? "Manual trigger with overrides"
-                  : "手动触发（仅应用下方覆盖项）",
+                label: en ? "Manual + overrides" : "手动触发（仅覆盖参数）",
               },
             ]}
             onValueChange={(v) =>
@@ -557,11 +580,11 @@ export function ReadingSection({
             }
           />
           <Select
-            label={en ? "Display override" : "显示方式覆盖"}
+            label={en ? "Display" : "显示方式"}
             value={siteDisplay}
             options={[
-              { value: "", label: en ? "Follow global" : "跟随全局默认" },
-              { value: "chinese", label: en ? "Translated mode" : "译文模式" },
+              { value: "", label: en ? "Global default" : "跟随全局" },
+              { value: "chinese", label: en ? "Translated" : "仅译文" },
               { value: "bilingual", label: en ? "Bilingual" : "双语对照" },
             ]}
             onValueChange={(v) =>
@@ -569,10 +592,10 @@ export function ReadingSection({
             }
           />
           <Select
-            label={en ? "Routing override" : "调用策略覆盖"}
+            label={en ? "Routing" : "调用策略"}
             value={siteRouting}
             options={[
-              { value: "", label: en ? "Follow global" : "跟随全局默认" },
+              { value: "", label: en ? "Global default" : "跟随全局" },
               { value: "local-first", label: en ? "Local-first" : "本地优先" },
               { value: "local-only", label: en ? "Local-only" : "仅本地" },
               { value: "cloud-only", label: en ? "Cloud-only" : "仅云端" },
@@ -584,18 +607,14 @@ export function ReadingSection({
             }
           />
           <TextInput
-            label={
-              en ? "Source language override" : "指定源语言（可选，如 en / ja）"
-            }
+            label={en ? "Source language" : "指定源语言（可选）"}
             placeholder="auto"
             value={siteSourceLang}
             onValueInput={(v) => setSiteSourceLang(v)}
           />
           <TextInput
-            label={
-              en ? "Extra CSS skip selector" : "补充跳过选择器（CSS，可选）"
-            }
-            placeholder=".code-viewer, .math-inline"
+            label={en ? "Skip CSS selector" : "跳过选择器（可选）"}
+            placeholder=".code-viewer, .math"
             value={siteSkipSelector}
             onValueInput={(v) => setSiteSkipSelector(v)}
           />
@@ -605,43 +624,18 @@ export function ReadingSection({
           checked={siteArticleOnly}
           onChange={(v) => setSiteArticleOnly(v)}
           label={
-            en
-              ? "Translate main article body only (skip nav, header, sidebar, footer)"
-              : "只翻译正文区域（自动识别正文，跳过导航栏、侧边栏与页脚）"
+            en ? "Main article body only" : "仅翻译正文（跳过导航、侧栏与页脚）"
           }
         />
 
-        <div class="actions">
+        <div class="actions" style={{ marginBottom: "12px" }}>
           <Button
+            icon={<IconPlus size={14} />}
             busy={store.isBusy("reading:site-save")}
             onClick={handleSaveSiteRule}
           >
-            {en ? "Add / update site rule" : "添加或更新网站规则"}
+            {en ? "Save Site Rule" : "保存网站规则"}
           </Button>
-          {lastRemovedSite ? (
-            <Button
-              variant="ghost"
-              onClick={async () => {
-                const snap = lastRemovedSite;
-                setLastRemovedSite(null);
-                await runTracedUiOp("undo-remove-site", async (t) => {
-                  const rpc = scopedRpc(t);
-                  await rpc.send("SAVE_SITE_RULE", snap);
-                  onSavedConfig(await rpc.send<SettingsView>("PRIVATE"));
-                });
-                toast(
-                  en
-                    ? `Restored rule for ${snap.origin}.`
-                    : `已撤销移除：${snap.origin}`,
-                  "success",
-                );
-              }}
-            >
-              {en
-                ? `Undo remove (${lastRemovedSite.origin})`
-                : `撤销移除（${lastRemovedSite.origin}）`}
-            </Button>
-          ) : null}
         </div>
 
         <DataList
@@ -649,48 +643,47 @@ export function ReadingSection({
           getKey={([origin]) => origin}
           emptyMessage={
             en
-              ? "No custom site rules yet. Add one above or toggle auto-translate from the page context menu."
-              : "暂无网站专属规则。可在上方添加，或在网页右键菜单中直接开启「此网站自动翻译」。"
+              ? "No custom site rules yet."
+              : "暂无网站专属规则，可在上方添加或在网页右键菜单直接设置。"
           }
           lang={lang}
           renderItem={([origin, rule]) => (
             <>
               <div class="list-row-main">
-                <strong style={{ overflowWrap: "anywhere" }}>{origin}</strong>
+                <strong>{origin}</strong>
                 <p class="hint">
                   {[
                     rule.mode === "auto"
                       ? en
-                        ? "Auto-translate"
+                        ? "Auto"
                         : "自动翻译"
                       : rule.mode === "never"
                         ? en
-                          ? "Never translate"
+                          ? "Never"
                           : "不自动翻译"
                         : en
-                          ? "Manual + overrides"
-                          : "手动触发（带覆盖）",
-                    rule.display
-                      ? rule.display === "bilingual"
+                          ? "Manual"
+                          : "手动",
+                    rule.display === "bilingual"
+                      ? en
+                        ? "Bilingual"
+                        : "双语"
+                      : rule.display === "chinese"
                         ? en
-                          ? "Bilingual"
-                          : "双语"
-                        : en
                           ? "Translated"
-                          : "译文"
-                      : "",
+                          : "仅译文"
+                        : "",
                     rule.routing || "",
                     rule.articleOnly ? (en ? "Article only" : "仅正文") : "",
-                    rule.skipSelector
-                      ? `${en ? "Skip" : "跳过"}: ${rule.skipSelector}`
-                      : "",
+                    rule.skipSelector ? `Skip: ${rule.skipSelector}` : "",
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
               </div>
-              <div class="actions">
+              <div class="actions" style={{ margin: 0 }}>
                 <Button
+                  size="sm"
                   onClick={() => {
                     setSiteOrigin(origin);
                     setSiteBehavior(rule.mode || "default");
@@ -704,7 +697,9 @@ export function ReadingSection({
                   {en ? "Edit" : "编辑"}
                 </Button>
                 <Button
+                  size="sm"
                   variant="danger"
+                  icon={<IconTrash size={13} />}
                   busy={store.isBusy(`site:remove:${origin}`)}
                   onClick={() => void handleRemoveSite(origin, rule)}
                 >
@@ -714,71 +709,7 @@ export function ReadingSection({
             </>
           )}
         />
-      </fieldset>
-
-      <fieldset>
-        <legend>
-          {en
-            ? "Local Files, PDF Reader & Shortcuts"
-            : "本地文件、PDF 阅读翻译与快捷键"}
-        </legend>
-        <p class="muted">
-          {fileAccessAllowed
-            ? en
-              ? "File URL access is enabled. Local HTML/TXT files can be translated directly, and local PDFs can be opened in Qingyi's built-in offline PDF reader."
-              : "已开启「允许访问文件网址」权限。本地 HTML/TXT 页面可直接右键翻译，PDF 文档可通过内置离线阅读器双语翻译。"
-            : en
-              ? "To translate local file:// pages directly, enable 'Allow access to file URLs' on Qingyi's extension details page. You can also open local PDFs right now in Qingyi's built-in offline PDF reader."
-              : "若需直接翻译本地 file:// 网页，请在浏览器扩展详情页中开启「允许访问文件网址」。您也可以直接打开下方内置 PDF 离线阅读器选择本地 PDF 翻译。"}
-        </p>
-        <div class="actions">
-          <Button
-            onClick={() => {
-              window.open(chrome.runtime.getURL("pdf.html"), "_blank");
-            }}
-          >
-            {en ? "Open Built-in PDF Translator" : "打开内置 PDF 阅读翻译器"}
-          </Button>
-          {!fileAccessAllowed ? (
-            <Button
-              onClick={() => {
-                void chrome.tabs.create({
-                  url: `chrome://extensions/?id=${chrome.runtime.id}`,
-                });
-              }}
-            >
-              {en ? "Open Extension Permissions" : "前往扩展详情开启文件权限"}
-            </Button>
-          ) : null}
-          <Button
-            onClick={() => {
-              void chrome.tabs.create({
-                url: "chrome://extensions/shortcuts",
-              });
-            }}
-          >
-            {en ? "Customize Shortcuts" : "自定义浏览器快捷键"}
-          </Button>
-        </div>
-
-        {commands.length > 0 ? (
-          <div class="rows">
-            {commands
-              .filter((c) => c.name && c.name !== "_execute_action")
-              .map((c) => (
-                <div key={c.name} class="list-row">
-                  <div class="list-row-main">
-                    <strong>{c.description || c.name}</strong>
-                    <span class="hint">
-                      <code>{c.name}</code>
-                    </span>
-                  </div>
-                  <Badge>{c.shortcut || (en ? "Unassigned" : "未绑定")}</Badge>
-                </div>
-              ))}
-          </div>
-        ) : null}
-      </fieldset>
+      </SettingGroup>
     </section>
   );
 }

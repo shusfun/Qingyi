@@ -22,6 +22,10 @@ export class PagePriorityQueue<U extends QueuedUnitLike> {
     return this.visible.size + this.near.size + this.other.size;
   }
 
+  get activeQueuedSize(): number {
+    return this.visible.size + this.near.size;
+  }
+
   enqueue(unit: U, tier: UnitPriorityTier = unit.tier): void {
     this.removeFromBuckets(unit);
     unit.tier = tier;
@@ -104,6 +108,7 @@ export class PagePriorityQueue<U extends QueuedUnitLike> {
         batch.push(u);
         chars += len;
         bucket.delete(u);
+        u.queued = false;
         if (batch.length >= options.maxItems) {
           return { batch, priority: topPriority, chars };
         }

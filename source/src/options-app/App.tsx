@@ -2,8 +2,15 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import {
   Badge,
   ConfirmHost,
+  IconActivity,
+  IconBookOpen,
+  IconBookmark,
+  IconDatabase,
+  IconRefresh,
+  IconSliders,
   StateBlock,
   ToastViewport,
+  feedbackStore,
   normalizeUiLang,
   resolveError,
   type UiLang,
@@ -78,13 +85,24 @@ const SECTIONS: {
   },
 ];
 
-function parseHashSection(): SectionId {
-  const raw = location.hash.replace(/^#/, "") as SectionId;
-  return SECTIONS.some((s) => s.id === raw) ? raw : "service";
+function parseHashRoute(): { section: SectionId; notice?: string } {
+  const full = location.hash.replace(/^#/, "");
+  const [rawId, query = ""] = full.split("?", 2);
+  const params = new URLSearchParams(query);
+  const notice = params.get("notice") || undefined;
+  if (rawId === "reading-file-access") {
+    return { section: "reading", notice };
+  }
+  const matched = SECTIONS.some((s) => s.id === rawId)
+    ? (rawId as SectionId)
+    : "service";
+  return { section: matched, notice };
 }
 
 export function App() {
-  const [section, setSection] = useState<SectionId>(parseHashSection);
+  const [section, setSection] = useState<SectionId>(
+    () => parseHashRoute().section,
+  );
   const [config, setConfig] = useState<SettingsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{
@@ -158,9 +176,20 @@ export function App() {
 
   useEffect(() => {
     void loadInitial();
-    const onHash = () => setSection(parseHashSection());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    const syncFromHash = () => {
+      const parsed = parseHashRoute();
+      setSection(parsed.section);
+      if (parsed.notice) {
+        const resolved = resolveError(parsed.notice, lang);
+        feedbackStore.setBanner(parsed.section, {
+          tone: "warning",
+          message: resolved.message,
+        });
+      }
+    };
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
 
   // Compute exact dirty section names (Q-33)
@@ -204,15 +233,30 @@ export function App() {
 
   const activeMeta = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
 
+  const sectionIcon = (id: SectionId) => {
+    switch (id) {
+      case "service":
+        return <IconSliders size={16} />;
+      case "reading":
+        return <IconBookOpen size={16} />;
+      case "storage":
+        return <IconDatabase size={16} />;
+      case "packs":
+        return <IconBookmark size={16} />;
+      case "diagnostic":
+        return <IconActivity size={16} />;
+      case "update":
+        return <IconRefresh size={16} />;
+    }
+  };
+
   return (
     <div class="shell">
       <aside class="sidebar">
         <a class="brand" href="#service">
-          轻译<span> / Qingyi</span>
+          <img src="./icons/logo.svg" alt="" />
+          <span>{en ? "Qingyi" : "轻译"}</span>
         </a>
-        <p class="eyebrow">
-          {en ? "Return to the text itself." : "阅读，回到文字本身。"}
-        </p>
         <nav aria-label={en ? "Settings navigation" : "设置导航"}>
           {SECTIONS.map((item) => (
             <a
@@ -220,133 +264,129 @@ export function App() {
               href={`#${item.id}`}
               aria-current={section === item.id ? "page" : undefined}
             >
-              {en ? item.enTitle : item.zhTitle}
+              {sectionIcon(item.id)}
+              <span>{en ? item.enTitle : item.zhTitle}</span>
             </a>
           ))}
         </nav>
-        <footer>
-          {en
-            ? `Qingyi v${version} · On-demand & Local-first`
-            : `轻译 v${version} · 本地保存 · 按需翻译`}
-        </footer>
+        <footer>v{version}</footer>
       </aside>
 
-      <main>
-        <header>
-          <div>
-            <p class="eyebrow">QINGYI / WORKSPACE</p>
+      <div class="shell-scroll">
+        <main>
+          <header>
             <h1>{en ? activeMeta.enTitle : activeMeta.zhTitle}</h1>
-            <p class="muted">
-              {en ? activeMeta.enSummary : activeMeta.zhSummary}
-            </p>
-          </div>
-          {dirtySections.length > 0 ? (
-            <Badge tone="info">
-              {en
-                ? `Unsaved edits (${dirtySections.join(", ")})`
-                : `有未保存的更改（${dirtySections.join("、")}）`}
-            </Badge>
-          ) : null}
-        </header>
+            {dirtySections.length > 0 ? (
+              <Badge tone="info">
+                {en
+                  ? `Unsaved (${dirtySections.join(", ")})`
+                  : `未保存：${dirtySections.join("、")}`}
+              </Badge>
+            ) : null}
+          </header>
 
-        {/* Q-20: Block form interaction when initial settings load is still pending or failed */}
-        {loading ? (
-          <StateBlock
-            kind="loading"
-            title={en ? "Loading settings…" : "正在读取配置…"}
-            message={
-              en
-                ? "Connecting to Qingyi background service."
-                : "正在从浏览器本地存储读取轻译配置。"
-            }
-            lang={lang}
-          />
-        ) : loadError || !config || !serviceDraft ? (
-          <StateBlock
-            kind="failed"
-            title={en ? "Failed to load settings" : "配置读取未成功"}
-            message={
-              loadError?.message ||
-              (en
-                ? "Unable to contact extension background worker."
-                : "无法连接轻译后台服务，表单已暂时锁定以防覆盖已有配置。")
-            }
-            detail={loadError?.detail}
-            onRetry={() => void loadInitial()}
-            lang={lang}
-          />
-        ) : section === "service" ? (
-          <ServiceSection
-            config={config}
-            draft={serviceDraft}
-            setDraft={(updater) =>
-              setServiceDraft((prev) => (prev ? updater(prev) : prev))
-            }
-            dirtySections={dirtySections}
-            onReloadAll={loadInitial}
-            onSavedConfig={(next) => {
-              setConfig(next);
-              setServiceDraft(createServiceDraft(next));
-            }}
-            lang={lang}
-          />
-        ) : section === "reading" ? (
-          <ReadingSection
-            config={config}
-            onSavedConfig={(next) => {
-              setConfig(next);
-              applyThemeDom(next["ui.theme"] || "system");
-              document.documentElement.lang =
-                next["ui.locale"] === "en" ? "en" : "zh-CN";
-            }}
-            lang={lang}
-          />
-        ) : section === "storage" ? (
-          <StorageSection
-            config={config}
-            budgetDraftGiB={budgetDraftGiB}
-            setBudgetDraftGiB={setBudgetDraftGiB}
-            cacheStatus={cacheStatus}
-            cacheError={cacheError}
-            onRefreshCache={refreshCacheStatus}
-            onSavedConfig={(next) => {
-              setConfig(next);
-              setBudgetDraftGiB(String(next.budgetBytes / (1024 * MiB)));
-            }}
-            lang={lang}
-          />
-        ) : section === "packs" ? (
-          <PacksSection
-            config={config}
-            packUrlDraft={packUrlDraft}
-            setPackUrlDraft={setPackUrlDraft}
-            onSavedPackUrl={(u) => {
-              setSavedPackUrl(u);
-              setPackUrlDraft(u);
-            }}
-            cacheStatus={cacheStatus}
-            onRefreshCache={refreshCacheStatus}
-            onSavedConfig={(next) => setConfig(next)}
-            lang={lang}
-          />
-        ) : section === "diagnostic" ? (
-          <DiagnosticSection lang={lang} />
-        ) : (
-          <UpdateSection
-            config={config}
-            releaseRepoDraft={releaseRepoDraft}
-            setReleaseRepoDraft={setReleaseRepoDraft}
-            dirtySections={dirtySections}
-            onSavedConfig={(next) => {
-              setConfig(next);
-              setReleaseRepoDraft(next.releaseRepo || "");
-            }}
-            onResetAllDrafts={(next) => resetDraftsFromConfig(next)}
-            onRefreshCache={refreshCacheStatus}
-            lang={lang}
-          />
-        )}
-      </main>
+          {loading ? (
+            <StateBlock
+              kind="loading"
+              title={en ? "Loading settings…" : "正在读取配置…"}
+              message={
+                en
+                  ? "Connecting to Qingyi background service."
+                  : "正在读取本地配置…"
+              }
+              lang={lang}
+            />
+          ) : loadError || !config || !serviceDraft ? (
+            <StateBlock
+              kind="failed"
+              title={en ? "Failed to load settings" : "配置读取未成功"}
+              message={
+                loadError?.message ||
+                (en
+                  ? "Unable to contact extension background worker."
+                  : "无法连接后台服务，表单已暂时锁定。")
+              }
+              detail={loadError?.detail}
+              onRetry={() => void loadInitial()}
+              lang={lang}
+            />
+          ) : (
+            <div key={section} class="page-enter">
+              {section === "service" ? (
+                <ServiceSection
+                  config={config}
+                  draft={serviceDraft}
+                  setDraft={(updater) =>
+                    setServiceDraft((prev) => (prev ? updater(prev) : prev))
+                  }
+                  dirtySections={dirtySections}
+                  onReloadAll={loadInitial}
+                  onSavedConfig={(next) => {
+                    setConfig(next);
+                    setServiceDraft(createServiceDraft(next));
+                  }}
+                  lang={lang}
+                />
+              ) : section === "reading" ? (
+                <ReadingSection
+                  config={config}
+                  onSavedConfig={(next) => {
+                    setConfig(next);
+                    applyThemeDom(next["ui.theme"] || "system");
+                    document.documentElement.lang =
+                      next["ui.locale"] === "en" ? "en" : "zh-CN";
+                  }}
+                  lang={lang}
+                />
+              ) : section === "storage" ? (
+                <StorageSection
+                  config={config}
+                  budgetDraftGiB={budgetDraftGiB}
+                  setBudgetDraftGiB={setBudgetDraftGiB}
+                  cacheStatus={cacheStatus}
+                  cacheError={cacheError}
+                  onRefreshCache={refreshCacheStatus}
+                  onSavedConfig={(next) => {
+                    setConfig(next);
+                    setBudgetDraftGiB(String(next.budgetBytes / (1024 * MiB)));
+                  }}
+                  lang={lang}
+                />
+              ) : section === "packs" ? (
+                <PacksSection
+                  config={config}
+                  packUrlDraft={packUrlDraft}
+                  setPackUrlDraft={setPackUrlDraft}
+                  onSavedPackUrl={(u) => {
+                    setSavedPackUrl(u);
+                    setPackUrlDraft(u);
+                  }}
+                  cacheStatus={cacheStatus}
+                  onRefreshCache={refreshCacheStatus}
+                  onSavedConfig={(next) => setConfig(next)}
+                  lang={lang}
+                />
+              ) : section === "diagnostic" ? (
+                <DiagnosticSection lang={lang} />
+              ) : (
+                <UpdateSection
+                  config={config}
+                  releaseRepoDraft={releaseRepoDraft}
+                  setReleaseRepoDraft={setReleaseRepoDraft}
+                  dirtySections={dirtySections}
+                  onSavedConfig={(next) => {
+                    setConfig(next);
+                    setReleaseRepoDraft(next.releaseRepo || "");
+                  }}
+                  onResetAllDrafts={(next) => resetDraftsFromConfig(next)}
+                  onRefreshCache={refreshCacheStatus}
+                  lang={lang}
+                />
+              )}
+            </div>
+          )}
+        </main>
+      </div>
 
       <ConfirmHost lang={lang} />
       <ToastViewport />

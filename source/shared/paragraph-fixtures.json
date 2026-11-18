@@ -1,0 +1,146 @@
+[
+  {
+    "id": "latin-soft-wrap-and-blank-line",
+    "description": "Latin PDF hard wraps merge with single space; blank lines split paragraphs",
+    "input": "Deep neural networks have achieved\nremarkable performance across many\nnatural language processing tasks.\n\nHowever, deploying them locally\nrequires careful memory budgeting.",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "Deep neural networks have achieved remarkable performance across many natural language processing tasks.",
+        "raw": "Deep neural networks have achieved\nremarkable performance across many\nnatural language processing tasks."
+      },
+      {
+        "merged": "However, deploying them locally requires careful memory budgeting.",
+        "raw": "However, deploying them locally\nrequires careful memory budgeting."
+      }
+    ]
+  },
+  {
+    "id": "cjk-direct-join",
+    "description": "CJK lines join directly without inserting spaces",
+    "input": "用户从 PDF 或截图复制的文字，\n常常在句子中间带有硬换行。\n如果按每个换行切开分别翻译，\n模型拿到的只是残句。",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "用户从 PDF 或截图复制的文字，常常在句子中间带有硬换行。如果按每个换行切开分别翻译，模型拿到的只是残句。",
+        "raw": "用户从 PDF 或截图复制的文字，\n常常在句子中间带有硬换行。\n如果按每个换行切开分别翻译，\n模型拿到的只是残句。"
+      }
+    ]
+  },
+  {
+    "id": "hyphenation-lowercase-vs-uppercase",
+    "description": "Trailing hyphen strips when next line starts lowercase, keeps when uppercase",
+    "input": "The architecture enables paralleliza-\ntion during inference on Non-\nVolatile memory devices.",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "The architecture enables parallelization during inference on Non-Volatile memory devices.",
+        "raw": "The architecture enables paralleliza-\ntion during inference on Non-\nVolatile memory devices."
+      }
+    ]
+  },
+  {
+    "id": "list-items-preserved-with-wrapped-continuation",
+    "description": "Numbered and bullet list items stay separate while wrapped continuation lines inside an item merge",
+    "input": "Key design goals:\n1. Local-first translation that keeps\nuser text on device.\n2. Shared dictionary and user revisions.\n- Zero intrusion on host web pages\n• Crisp desktop utility interface\n(a) Optional image overlay mode",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "Key design goals:",
+        "raw": "Key design goals:"
+      },
+      {
+        "merged": "1. Local-first translation that keeps user text on device.",
+        "raw": "1. Local-first translation that keeps\nuser text on device."
+      },
+      {
+        "merged": "2. Shared dictionary and user revisions.",
+        "raw": "2. Shared dictionary and user revisions."
+      },
+      {
+        "merged": "- Zero intrusion on host web pages",
+        "raw": "- Zero intrusion on host web pages"
+      },
+      {
+        "merged": "• Crisp desktop utility interface",
+        "raw": "• Crisp desktop utility interface"
+      },
+      {
+        "merged": "(a) Optional image overlay mode",
+        "raw": "(a) Optional image overlay mode"
+      }
+    ]
+  },
+  {
+    "id": "short-headings-en-and-zh",
+    "description": "Standalone short headings do not merge into the body paragraph below",
+    "input": "Abstract\nThis paper describes a lightweight paragraph reconstruction method for bilingual reading.\n\n实验结果与分析\n在双栏学术论文与屏幕截图场景下，段内合并显著降低了残句率。",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "Abstract",
+        "raw": "Abstract"
+      },
+      {
+        "merged": "This paper describes a lightweight paragraph reconstruction method for bilingual reading.",
+        "raw": "This paper describes a lightweight paragraph reconstruction method for bilingual reading."
+      },
+      {
+        "merged": "实验结果与分析",
+        "raw": "实验结果与分析"
+      },
+      {
+        "merged": "在双栏学术论文与屏幕截图场景下，段内合并显著降低了残句率。",
+        "raw": "在双栏学术论文与屏幕截图场景下，段内合并显著降低了残句率。"
+      }
+    ]
+  },
+  {
+    "id": "code-and-markdown-table-preserved",
+    "description": "Code lines and Markdown table rows keep their line breaks",
+    "input": "| Mode | Default |\n| --- | --- |\n| Bilingual | Yes |\n\nconst total = computeBudget(4);\nreturn total;",
+    "preserveLineBreaks": false,
+    "expected": [
+      {
+        "merged": "| Mode | Default |",
+        "raw": "| Mode | Default |"
+      },
+      {
+        "merged": "| --- | --- |",
+        "raw": "| --- | --- |"
+      },
+      {
+        "merged": "| Bilingual | Yes |",
+        "raw": "| Bilingual | Yes |"
+      },
+      {
+        "merged": "const total = computeBudget(4);",
+        "raw": "const total = computeBudget(4);"
+      },
+      {
+        "merged": "return total;",
+        "raw": "return total;"
+      }
+    ]
+  },
+  {
+    "id": "preserve-line-breaks-mode",
+    "description": "Line-by-line mode keeps every original non-empty line separate for poetry or logs",
+    "input": "Two roads diverged in a yellow wood,\nAnd sorry I could not travel both\n\nAnd be one traveler, long I stood",
+    "preserveLineBreaks": true,
+    "expected": [
+      {
+        "merged": "Two roads diverged in a yellow wood,",
+        "raw": "Two roads diverged in a yellow wood,"
+      },
+      {
+        "merged": "And sorry I could not travel both",
+        "raw": "And sorry I could not travel both"
+      },
+      {
+        "merged": "And be one traveler, long I stood",
+        "raw": "And be one traveler, long I stood"
+      }
+    ]
+  }
+]

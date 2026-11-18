@@ -26,21 +26,31 @@ jobs:
       - run: npm test
       - run: npm run release
       - name: Verify release version
+        id: assets
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag/package version mismatch' }
+          $zip = "releases/qingyi-$version-chromium.zip"
+          foreach ($file in @($zip, "$zip.sha256")) {
+            if (!(Test-Path -LiteralPath "../$file" -PathType Leaf)) { throw "Missing $file" }
+          }
+          "zip=$zip" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
         with:
           name: qingyi-chromium
-          path: releases/*
+          if-no-files-found: error
+          path: |
+            ${{ steps.assets.outputs.zip }}
+            ${{ steps.assets.outputs.zip }}.sha256
       - name: Publish current version
         if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ZIP: ${{ steps.assets.outputs.zip }}
         run: |
           gh release view $env:GITHUB_REF_NAME --json tagName *> $null
           if ($LASTEXITCODE -eq 0) { Write-Output 'Existing release retained for verified replacement.'; exit 0 }
-          gh release create $env:GITHUB_REF_NAME --verify-tag --generate-notes (Get-ChildItem ../releases -File | ForEach-Object FullName)
+          gh release create $env:GITHUB_REF_NAME --verify-tag --generate-notes "../$env:RELEASE_ZIP" "../$env:RELEASE_ZIP.sha256"
           if ($LASTEXITCODE) { throw 'Release publication failed' }

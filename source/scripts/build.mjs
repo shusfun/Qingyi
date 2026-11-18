@@ -77,6 +77,12 @@ const manifest = {
   name: "__MSG_extName__",
   version,
   description: "__MSG_extDescription__",
+  icons: {
+    16: "icons/icon-16.png",
+    32: "icons/icon-32.png",
+    48: "icons/icon-48.png",
+    128: "icons/icon-128.png",
+  },
   key,
   minimum_chrome_version: "120",
   permissions: [

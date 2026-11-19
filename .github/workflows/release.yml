@@ -52,5 +52,5 @@ jobs:
         run: |
           gh release view $env:GITHUB_REF_NAME --json tagName *> $null
           if ($LASTEXITCODE -eq 0) { Write-Output 'Existing release retained for verified replacement.'; exit 0 }
-          gh release create $env:GITHUB_REF_NAME --verify-tag --generate-notes --latest "../$env:RELEASE_ZIP" "../$env:RELEASE_ZIP.sha256"
+          gh release create $env:GITHUB_REF_NAME --verify-tag --generate-notes "../$env:RELEASE_ZIP" "../$env:RELEASE_ZIP.sha256"
           if ($LASTEXITCODE) { throw 'Release publication failed' }

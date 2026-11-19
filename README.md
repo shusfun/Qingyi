@@ -56,7 +56,7 @@ manifest 字段：`format:"qingyi-pack-v1"`、`id`、递增 `version`、`kind:"f
 
 ## 更新和旧版迁移
 
-维护者发版遵循[版本发布规则](docs/decisions/0002-release-versioning.md)。
+维护者发版遵循[版本发布规则](docs/decisions/0003-release-history-reset.md)。
 
 `npm run release` 生成版本 ZIP 和 SHA-256。设置 GitHub `owner/repo`，手动检查最新 Release 并下载。安装包名须为 `qingyi-版本号-chromium.zip`，摘要文件名为安装包名加 `.sha256`；检查器只提供该仓库中与 Release 版本匹配的资源。没有匹配包或摘要时会明确提示。核对摘要后替换目录、重新加载；未打包扩展不能自动安装更新。本项目构建不发布远程仓库。构建产物仅含程序和文档，不包含浏览器中的配置、Key、缓存或诊断。
 

@@ -1,4 +1,5 @@
 import { createContext, type ComponentChildren, type JSX } from "preact";
+import { createPortal } from "preact/compat";
 import { useContext, useEffect, useId, useRef, useState } from "preact/hooks";
 import { normalizeUiLang, type UiLang } from "./errors";
 import {
@@ -910,23 +911,42 @@ export function ConfirmHost({ lang }: { lang?: string | null }) {
   );
 }
 
+const FeedbackLayer = createContext<HTMLDivElement | null>(null);
+
+export function FloatingFeedback({
+  children,
+}: {
+  children: ComponentChildren;
+}) {
+  const [layer, setLayer] = useState<HTMLDivElement | null>(null);
+  return (
+    <FeedbackLayer.Provider value={layer}>
+      {children}
+      <div class="floating-feedback" ref={setLayer} />
+    </FeedbackLayer.Provider>
+  );
+}
+
 export function FeedbackBanner({
   scope,
   message: directMessage,
   lang,
+  inline = false,
 }: {
   scope?: string;
   message?: FeedbackMessage | null;
   lang?: string | null;
+  inline?: boolean;
 }) {
   const store = useFeedbackStore();
+  const layer = useContext(FeedbackLayer);
   const item = directMessage ?? (scope ? store.getBanner(scope) : undefined);
   if (!item || !item.message) return null;
 
   const en = normalizeUiLang(lang) === "en";
   const isError = item.tone === "error";
 
-  return (
+  const banner = (
     <div
       class="feedback-banner"
       data-tone={item.tone}
@@ -935,6 +955,16 @@ export function FeedbackBanner({
     >
       <div>
         <span>{item.message}</span>
+        {(inline || layer) && scope && !directMessage ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            class="feedback-dismiss"
+            aria-label={en ? "Dismiss notification" : "关闭消息"}
+            icon={<IconClose size={14} />}
+            onClick={() => store.clearBanner(scope)}
+          />
+        ) : null}
         {item.actionLabel && item.actionHref ? (
           <>
             {" "}
@@ -965,6 +995,7 @@ export function FeedbackBanner({
       ) : null}
     </div>
   );
+  return layer && !inline ? createPortal(banner, layer) : banner;
 }
 
 export function ToastViewport() {

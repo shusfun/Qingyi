@@ -1,6 +1,6 @@
 {
   "name": "qingyi-extension",
-  "version": "3.2.1",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {

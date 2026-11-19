@@ -453,6 +453,45 @@ input[type="search"]::-webkit-search-cancel-button {
   pointer-events: none;
 }
 
+@supports (appearance: base-select) and selector(::picker(select)) {
+  .ds-select-wrap select,
+  .ds-select-wrap select::picker(select) {
+    appearance: base-select;
+  }
+
+  .ds-select-wrap select::picker-icon {
+    display: none;
+  }
+
+  .ds-select-wrap select:open + .ds-select-arrow {
+    transform: translateY(-50%) rotate(180deg);
+  }
+
+  .ds-select-wrap select::picker(select) {
+    max-block-size: 40dvh;
+    padding: var(--space-1);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+    box-shadow: var(--material-shadow-strong);
+  }
+
+  .ds-select-wrap select option {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: transparent;
+  }
+
+  .ds-select-wrap select option:checked {
+    background: var(--color-accent-soft);
+  }
+
+  .ds-select-wrap select option:is(:hover, :focus-visible):not(:disabled) {
+    background: var(--ring);
+  }
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--color-accent);
@@ -679,6 +718,10 @@ label.field,
 .setting-row-info {
   flex: 1 1 220px;
   min-width: 0;
+}
+
+.setting-row.vertical > .setting-row-info {
+  flex: 0 0 auto;
 }
 
 .setting-row-title {
@@ -1291,6 +1334,26 @@ dialog {
 }
 
 /* Feedback Banners & Floating Toasts */
+.floating-feedback {
+  position: fixed;
+  inset-inline-end: var(--space-5);
+  inset-block-start: calc(var(--control-height) + var(--space-5));
+  z-index: 9400;
+  inline-size: min(25rem, calc(100vw - var(--space-8)));
+  max-block-size: 55dvh;
+  overflow: auto;
+  pointer-events: none;
+}
+
+.floating-feedback .feedback-banner {
+  pointer-events: auto;
+}
+
+.feedback-dismiss {
+  float: inline-end;
+  margin-inline-start: var(--space-2);
+}
+
 .feedback-banner {
   padding: 10px 14px;
   margin: 0 0 12px;
@@ -1452,6 +1515,9 @@ section[hidden] {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+  }
+  .setting-row > .setting-row-info {
+    flex: 0 0 auto;
   }
   .setting-row-control,
   .setting-row-control.wide,

@@ -885,6 +885,10 @@ export const ERROR_DICTIONARY: Record<string, ErrorEntry> = {
     zh: "无法转发请求到内部推理引擎，引擎可能刚退出。",
     en: "Failed to connect to internal inference engine process.",
   },
+  engine_inference_failed: {
+    zh: "本地模型推理失败。可查看部署日志；使用 CUDA 时可尝试切换到 CPU。",
+    en: "Local inference failed. Check the deployment logs, or try switching to CPU if using CUDA.",
+  },
   nvidia_driver_unavailable: {
     zh: "未检测到可用的 NVIDIA 显卡驱动（nvidia-smi），当前环境不可使用 CUDA。",
     en: "NVIDIA driver (nvidia-smi) not detected; CUDA is unavailable on this machine.",
@@ -1214,6 +1218,14 @@ export const ERROR_DICTIONARY: Record<string, ErrorEntry> = {
   ocr_failed: {
     zh: "图片文字识别（OCR）失败，请重试或在设置中检查 OCR 运行时状态。",
     en: "Optical character recognition (OCR) failed. Retry or check OCR runtime status in Settings.",
+  },
+  ocr_image_too_large: {
+    zh: "图片超过 16 MiB 或约 3200 万像素，请缩小后重试。",
+    en: "The image exceeds 16 MiB or 32 megapixels. Try a smaller image.",
+  },
+  screenshot_in_progress: {
+    zh: "正在截图，请稍候。",
+    en: "A screen capture is already in progress.",
   },
   ocr_empty_text: {
     zh: "未在所选区域或图片中识别到可翻译的文字。",
